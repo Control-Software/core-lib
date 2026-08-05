@@ -11,6 +11,7 @@ export {
 	type CoreStatsMemory,
 	type CoreStatsPayload,
 	type CoreStatsSystem,
+	type CoreStatsWebSockets,
 } from './CoreStats'
 export { Res } from './Response'
 export {

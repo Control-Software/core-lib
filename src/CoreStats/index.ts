@@ -6,9 +6,14 @@ import {
 	type ControllerStatsEndpoint,
 } from '../Controller'
 import { getModulesStats, type ModuleType } from '../Modules'
+import {
+	getWebSocketControllersStats,
+	type WebSocketControllersStats,
+} from '../WebSocketController'
 
 export type CoreStatsModule = ModuleType
 export type CoreStatsEndpoint = ControllerStatsEndpoint
+export type CoreStatsWebSockets = WebSocketControllersStats
 export type CoreStatsCommand =
 	| 'free -m'
 	| 'df -h'
@@ -80,8 +85,11 @@ export type CoreStatsPayload = {
 		totalModulesFull: number
 		totalModulesShare: number
 		totalModulesMws: number
+		totalWebSocketControllers: number
+		activeWebSocketConnections: number
 	}
 	endpoints: CoreStatsEndpoint[]
+	webSockets: CoreStatsWebSockets
 	modules: CoreStatsModule[]
 	system: CoreStatsSystem
 }
@@ -133,9 +141,10 @@ export class CoreStats {
 	}
 
 	public async getStats(): Promise<CoreStatsPayload> {
-		const [controllersStats, modulesStats, system] = await Promise.all([
+		const [controllersStats, modulesStats, webSocketStats, system] = await Promise.all([
 			Promise.resolve(getControllersStats()),
 			Promise.resolve(getModulesStats()),
+			Promise.resolve(getWebSocketControllersStats()),
 			this.getSystemStats(),
 		])
 
@@ -152,8 +161,11 @@ export class CoreStats {
 				totalModulesFull: modulesStats.totalModulesFull,
 				totalModulesShare: modulesStats.totalModulesShare,
 				totalModulesMws: modulesStats.totalModulesMws,
+				totalWebSocketControllers: webSocketStats.totalControllers,
+				activeWebSocketConnections: webSocketStats.activeConnections,
 			},
 			endpoints: controllersStats.endpoints,
+			webSockets: webSocketStats,
 			modules: modulesStats.modules,
 			system,
 		}

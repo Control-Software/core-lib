@@ -4,6 +4,11 @@ import { logger } from '../Logger'
 import { Controller } from '../Controller'
 import type { EventsDomain } from '../EventsDomain'
 import type { TypeHook } from '../Server/types'
+import {
+	WebSocketController,
+	type WebSocketControllerOptions,
+	type WebSocketData,
+} from '../WebSocketController'
 
 // 🤖🧩📡⚙️🔎⭕️
 export const Module = z.object({
@@ -129,6 +134,7 @@ type TypeRegisteredMiddleware = {
 
 export class Modules {
 	private readonly controllers: Controller[] = []
+	private readonly webSocketControllers: WebSocketController<any>[] = []
 	private readonly hooks: TypeHook[] = []
 	private readonly middlewareModules = new Map<string, TypeRegisteredMiddleware>()
 	private readonly fullModules: ModuleType[] = []
@@ -170,6 +176,7 @@ export class Modules {
 
 		for (const discovered of fullModules) {
 			await this.loadControllers(discovered.module, discovered.moduleFilePath)
+			await this.loadWebSocketControllers(discovered.module, discovered.moduleFilePath)
 			await this.loadEvents(discovered.module, discovered.moduleFilePath)
 			await this.initializeModule(discovered.module)
 		}
@@ -189,7 +196,7 @@ export class Modules {
 		this.trackModule(this.sharedModules, module)
 
 		const moduleDir = this.dirname(moduleFilePath)
-		const unsupportedShareDirs = ['controllers', 'events', 'mws']
+		const unsupportedShareDirs = ['controllers', 'events', 'mws', 'websockets']
 
 		for (const dirName of unsupportedShareDirs) {
 			const fullDirPath = this.joinPath(moduleDir, dirName)
@@ -368,6 +375,93 @@ export class Modules {
 			}
 			throw error
 		}
+	}
+
+	private async loadWebSocketControllers(
+		module: ModuleType,
+		moduleFilePath: string,
+	): Promise<void> {
+		const webSocketsDir = this.joinPath(this.dirname(moduleFilePath), 'websockets')
+		if (!(await this.directoryExists(webSocketsDir))) {
+			return
+		}
+
+		const glob = new Glob('**/*.ts')
+
+		for await (const file of glob.scan(webSocketsDir)) {
+			const definitionPath = this.joinPath(webSocketsDir, file)
+			logger.debug('🔌 Loading WebSocket controller:', definitionPath)
+
+			try {
+				const definitionModule = await import(this.toFileImportURL(definitionPath))
+				const controller = this.createWebSocketController(definitionModule.default)
+				if (controller) {
+					this.webSocketControllers.push(controller)
+				}
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error)
+				throw new Error(
+					`Invalid WebSocket controller ${definitionPath} in ${module.name}@${module.version}: ${reason}`,
+					{ cause: error },
+				)
+			}
+		}
+	}
+
+	private createWebSocketController(
+		value: unknown,
+	): WebSocketController<WebSocketData> | null {
+		if (!value || typeof value !== 'object' || Array.isArray(value)) {
+			throw new TypeError('default export must be an object.')
+		}
+
+		const definition = value as Record<string, unknown>
+		if (definition.enabled !== undefined && typeof definition.enabled !== 'boolean') {
+			throw new TypeError('enabled must be a boolean when provided.')
+		}
+		if (definition.enabled === false) {
+			return null
+		}
+
+		for (const property of ['name', 'version'] as const) {
+			if (typeof definition[property] !== 'string') {
+				throw new TypeError(`${property} must be a string.`)
+			}
+		}
+
+		const callbacks = [
+			'upgrade',
+			'open',
+			'message',
+			'drain',
+			'close',
+			'ping',
+			'pong',
+			'handleError',
+		] as const
+
+		for (const callback of callbacks) {
+			if (
+				definition[callback] !== undefined &&
+				typeof definition[callback] !== 'function'
+			) {
+				throw new TypeError(`${callback} must be a function when provided.`)
+			}
+		}
+
+		const properties: Record<string, unknown> = {
+			path: definition.path,
+			upgrade: definition.upgrade,
+		}
+		for (const callback of callbacks.slice(1)) {
+			if (definition[callback] !== undefined) {
+				properties[callback] = definition[callback]
+			}
+		}
+
+		return new WebSocketController(
+			properties as WebSocketControllerOptions<WebSocketData>,
+		)
 	}
 
 	private executeMiddlewareHandlers(
@@ -710,6 +804,10 @@ export class Modules {
 
 	getControllers(): Controller[] {
 		return this.controllers
+	}
+
+	getWebSocketControllers(): WebSocketController<any>[] {
+		return this.webSocketControllers
 	}
 
 	getHooks(): TypeHook[] {

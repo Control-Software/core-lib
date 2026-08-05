@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { clearControllersStats, Controller, getControllersStats } from '../Controller'
 import { clearModulesStats } from '../Modules'
 import { RouteControllers } from '../RouteControllers'
+import {
+	clearWebSocketControllersStats,
+	WebSocketController,
+} from '../WebSocketController'
 import { CoreStats, type CoreStatsCommand, type CoreStatsCommandResult } from './index'
 
 const commandOutputs: Record<CoreStatsCommand, CoreStatsCommandResult> = {
@@ -38,6 +42,7 @@ describe('CoreStats', () => {
 	beforeEach(() => {
 		clearControllersStats()
 		clearModulesStats()
+		clearWebSocketControllersStats()
 		delete process.env.ENABLE_CORE_STATS
 	})
 
@@ -66,6 +71,10 @@ describe('CoreStats', () => {
 		const users = new Controller('GET', '/users', async (_req, res) => {
 			return res.json({ ok: true })
 		}).post()
+		new WebSocketController({
+			path: '/ws/users/:userId',
+			upgrade: ({ params }) => ({ data: { userId: params.userId } }),
+		})
 
 		const router = new RouteControllers([health, users])
 		const coreStats = new CoreStats({
@@ -81,12 +90,19 @@ describe('CoreStats', () => {
 		expect(stats.summary.totalControllers).toBe(3)
 		expect(stats.summary.totalEndpoints).toBe(4)
 		expect(stats.summary.totalModulesLoaded).toBe(0)
+		expect(stats.summary.totalWebSocketControllers).toBe(1)
+		expect(stats.summary.activeWebSocketConnections).toBe(0)
 		expect(stats.endpoints).toEqual([
 			{ method: 'GET', path: '/core/stats' },
 			{ method: 'GET', path: '/health' },
 			{ method: 'GET', path: '/users' },
 			{ method: 'POST', path: '/users' },
 		])
+		expect(stats.webSockets).toEqual({
+			totalControllers: 1,
+			activeConnections: 0,
+			routes: [{ path: '/ws/users/:userId', activeConnections: 0 }],
+		})
 		expect(stats.system.memory.totalMB).toBe(2048)
 		expect(stats.system.memory.usedMB).toBe(1024)
 		expect(stats.system.memory.availableMB).toBe(1536)

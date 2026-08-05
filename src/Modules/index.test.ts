@@ -3,19 +3,30 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clearControllersStats } from '../Controller'
+import { setLogSink, type LogSink } from '../Logger'
+import { clearWebSocketControllersStats } from '../WebSocketController'
 import { clearModulesStats, getModulesStats, Modules } from './index'
+
+const defaultLogSink: LogSink = {
+	debug: (...args) => console.log(...args),
+	info: (...args) => console.info(...args),
+	warn: (...args) => console.warn(...args),
+	error: (...args) => console.error(...args),
+}
 
 describe('getModulesStats', () => {
 	let fixtureDir = ''
 
 	beforeEach(async () => {
 		clearControllersStats()
+		clearWebSocketControllersStats()
 		clearModulesStats()
 		fixtureDir = await mkdtemp(join(tmpdir(), 's42-core-modules-'))
 
 		await mkdir(join(fixtureDir, 'auth', 'mws'), { recursive: true })
 		await mkdir(join(fixtureDir, 'share'), { recursive: true })
 		await mkdir(join(fixtureDir, 'operators', 'controllers'), { recursive: true })
+		await mkdir(join(fixtureDir, 'operators', 'websockets'), { recursive: true })
 
 		await writeFile(
 			join(fixtureDir, 'auth', '__module__.ts'),
@@ -36,6 +47,10 @@ describe('getModulesStats', () => {
 		await writeFile(
 			join(fixtureDir, 'operators', 'controllers', 'list.ts'),
 			`export default { name: 'operators.list', version: '1.0.0', method: 'GET', path: '/operators/list', handler: async (_req, res) => res.json({ ok: true }) }\n`,
+		)
+		await writeFile(
+			join(fixtureDir, 'operators', 'websockets', 'stream.ts'),
+			`export default { name: 'operators.stream', version: '1.0.0', path: '/ws/operators/:operatorId', upgrade: ({ params }) => ({ data: { operatorId: params.operatorId } }), message: (ws, message) => ws.send(message) }\n`,
 		)
 	})
 
@@ -90,5 +105,74 @@ describe('getModulesStats', () => {
 		])
 
 		delete (globalThis as Record<string, unknown>)[initializeEventsKey]
+	})
+
+	test('discovers enabled WebSocket controllers from full modules', async () => {
+		await writeFile(
+			join(fixtureDir, 'operators', 'websockets', 'disabled.ts'),
+			`export default { enabled: false }\n`,
+		)
+
+		const modules = new Modules(fixtureDir)
+		await modules.load()
+
+		expect(modules.getWebSocketControllers()).toHaveLength(1)
+		expect(modules.getWebSocketControllers()[0]?.getPath()).toBe(
+			'/ws/operators/:operatorId',
+		)
+	})
+
+	test('accepts full modules without a websockets directory', async () => {
+		await rm(join(fixtureDir, 'operators', 'websockets'), {
+			recursive: true,
+			force: true,
+		})
+
+		const modules = new Modules(fixtureDir)
+		await modules.load()
+
+		expect(modules.getWebSocketControllers()).toEqual([])
+	})
+
+	test('fails load with the file and reason for an invalid definition', async () => {
+		const invalidPath = join(fixtureDir, 'operators', 'websockets', 'invalid.ts')
+		await writeFile(
+			invalidPath,
+			`export default { name: 'operators.invalid', version: '1.0.0', path: '/ws/invalid', upgrade: 'not-a-function' }\n`,
+		)
+
+		const modules = new Modules(fixtureDir)
+		const loading = modules.load()
+
+		await expect(loading).rejects.toThrow(invalidPath)
+		await expect(loading).rejects.toThrow('upgrade must be a function when provided')
+	})
+
+	test('ignores websockets in share modules and emits a warning', async () => {
+		await mkdir(join(fixtureDir, 'share', 'websockets'), { recursive: true })
+		await writeFile(
+			join(fixtureDir, 'share', 'websockets', 'ignored.ts'),
+			`export default { name: 'share.ignored', version: '1.0.0', path: '/ws/share', upgrade: () => ({ data: {} }) }\n`,
+		)
+
+		const warnings: unknown[][] = []
+		setLogSink({
+			debug: () => {},
+			info: () => {},
+			warn: (...args) => warnings.push(args),
+			error: () => {},
+		})
+
+		try {
+			const modules = new Modules(fixtureDir)
+			await modules.load()
+
+			expect(modules.getWebSocketControllers()).toHaveLength(1)
+			expect(
+				warnings.some(args => String(args[0]).includes('ignores "websockets"')),
+			).toBe(true)
+		} finally {
+			setLogSink(defaultLogSink)
+		}
 	})
 })
