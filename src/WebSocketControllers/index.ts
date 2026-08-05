@@ -38,7 +38,7 @@ export class WebSocketControllers {
 	private readonly controllers: AnyWebSocketController[]
 	private readonly routes: CompiledRoute[]
 	private readonly options: WebSocketServerOptions
-	private readonly handler: Bun.WebSocketHandler<InternalWebSocketData>
+	private readonly handler: Bun.WebSocketHandler<WebSocketData>
 	private readonly controllerBySocket = new WeakMap<
 		InternalWebSocketPeer,
 		AnyWebSocketController
@@ -87,7 +87,7 @@ export class WebSocketControllers {
 
 	public async tryUpgrade(
 		request: Request,
-		server: Bun.Server<InternalWebSocketData>,
+		server: Bun.Server<WebSocketData>,
 	): Promise<WebSocketUpgradeDispatchResult> {
 		if (!this.isUpgradeRequest(request)) {
 			return { matched: false }
@@ -151,20 +151,21 @@ export class WebSocketControllers {
 		}
 	}
 
-	public getHandler(): Bun.WebSocketHandler<InternalWebSocketData> {
+	public getHandler(): Bun.WebSocketHandler<WebSocketData> {
 		return this.handler
 	}
 
-	private createHandler(): Bun.WebSocketHandler<InternalWebSocketData> {
+	private createHandler(): Bun.WebSocketHandler<WebSocketData> {
 		return {
 			...this.options,
-			data: {} as InternalWebSocketData,
-			open: ws => this.onOpen(ws),
-			message: (ws, message) => this.onMessage(ws, message),
-			drain: ws => this.onDrain(ws),
-			close: (ws, code, reason) => this.onClose(ws, code, reason),
-			ping: (ws, data) => this.onPing(ws, data),
-			pong: (ws, data) => this.onPong(ws, data),
+			data: {} as WebSocketData,
+			open: ws => this.onOpen(ws as InternalWebSocketPeer),
+			message: (ws, message) => this.onMessage(ws as InternalWebSocketPeer, message),
+			drain: ws => this.onDrain(ws as InternalWebSocketPeer),
+			close: (ws, code, reason) =>
+				this.onClose(ws as InternalWebSocketPeer, code, reason),
+			ping: (ws, data) => this.onPing(ws as InternalWebSocketPeer, data),
+			pong: (ws, data) => this.onPong(ws as InternalWebSocketPeer, data),
 		}
 	}
 

@@ -13,7 +13,11 @@ export {
 	type CoreStatsSystem,
 } from './CoreStats'
 export { Res } from './Response'
-export { Server } from './Server'
+export {
+	Server,
+	type ServerWebSocketPublishData,
+	type TypeServerConstructor,
+} from './Server'
 export { EventsDomain } from './EventsDomain'
 export { RedisEventsAdapter } from './EventsDomain/adapters/redis.adapter'
 export {

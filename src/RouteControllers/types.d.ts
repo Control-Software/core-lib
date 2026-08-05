@@ -1,8 +1,6 @@
 import { type Res } from '../Response'
 
-export type TypeReturnCallback = (
-	req: Request,
-) => Response | Promise<Response> | void | Promise<void>
+export type TypeReturnCallback = (req: Request) => Promise<Response>
 
 export type RouteCheckResult = {
 	exists: boolean
