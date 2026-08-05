@@ -38,6 +38,26 @@ export {
 	type ControllersStats,
 } from './Controller'
 export { RouteControllers } from './RouteControllers'
+export {
+	WebSocketController,
+	getWebSocketControllersStats,
+	type ModuleWebSocketControllerDefinition,
+	type WebSocketControllerOptions,
+	type WebSocketControllerStatsRoute,
+	type WebSocketControllersStats,
+	type WebSocketData,
+	type WebSocketErrorContext,
+	type WebSocketErrorPhase,
+	type WebSocketHandlerResult,
+	type WebSocketMessage,
+	type WebSocketPeer,
+	type WebSocketPingData,
+	type WebSocketPongData,
+	type WebSocketUpgradeAccept,
+	type WebSocketUpgradeContext,
+	type WebSocketUpgradeResult,
+} from './WebSocketController'
+export { WebSocketControllers, type WebSocketServerOptions } from './WebSocketControllers'
 export { SSE, type TypeSSEventToSend } from './SSE'
 export * as Test from './Test'
 export { SQLite } from './SQLite'
