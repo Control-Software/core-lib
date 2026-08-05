@@ -1,6 +1,7 @@
 # Plan de soporte WebSocket nativo
 
-Estado: propuesta de implementación para revisión antes de escribir código WebSocket.
+Estado: aprobado e implementado. Fases 0–6 completas; release minor diferida
+hasta que el usuario cierre el bloque `[Unreleased]`.
 
 Fecha: 2026-08-05.
 
@@ -582,74 +583,74 @@ autenticación.
 
 ### Fase 0 — Baseline y compatibilidad
 
-- [ ] Registrar estado de git y preservar cambios ajenos/no relacionados.
-- [ ] Ejecutar baseline de typecheck, lint y tests.
-- [ ] Verificar el contrato mínimo necesario contra Bun 1.3.x y los tipos
+- [x] Registrar estado de git y preservar cambios ajenos/no relacionados.
+- [x] Ejecutar baseline de typecheck, lint y tests.
+- [x] Verificar el contrato mínimo necesario contra Bun 1.3.x y los tipos
       instalados.
-- [ ] Crear un spike descartable que confirme `upgrade`, `data`, headers,
+- [x] Crear un spike descartable que confirme `upgrade`, `data`, headers,
       mensajes binarios, ping/pong, pub/sub y stop en Bun 1.3.14.
-- [ ] No ampliar el uso de APIs que requieran subir `engines.bun`; si aparece
+- [x] No ampliar el uso de APIs que requieran subir `engines.bun`; si aparece
       una necesidad real, documentarla y solicitar decisión antes de cambiar el
       mínimo.
 
 ### Fase 1 — Controller y tipos
 
-- [ ] Crear `WebSocketController<TData>` y todos los tipos públicos.
-- [ ] Validar path, callback `upgrade` y resultado de aceptación.
-- [ ] Implementar handlers opcionales y `handleError`.
-- [ ] Derivar los tipos nativos de Bun en lugar de duplicarlos.
-- [ ] Cubrir inferencia de `ws.data`, mensajes, respuestas y errores con tests
+- [x] Crear `WebSocketController<TData>` y todos los tipos públicos.
+- [x] Validar path, callback `upgrade` y resultado de aceptación.
+- [x] Implementar handlers opcionales y `handleError`.
+- [x] Derivar los tipos nativos de Bun en lugar de duplicarlos.
+- [x] Cubrir inferencia de `ws.data`, mensajes, respuestas y errores con tests
       TypeScript.
 
 ### Fase 2 — Registry, matcher y dispatcher
 
-- [ ] Crear `WebSocketControllers` con opciones globales.
-- [ ] Implementar matching determinista y rechazo de rutas ambiguas.
-- [ ] Implementar el resultado interno `matched/response` del handshake.
-- [ ] Adjuntar metadata privada al upgrade y mover el routing a `WeakMap` en
+- [x] Crear `WebSocketControllers` con opciones globales.
+- [x] Implementar matching determinista y rechazo de rutas ambiguas.
+- [x] Implementar el resultado interno `matched/response` del handshake.
+- [x] Adjuntar metadata privada al upgrade y mover el routing a `WeakMap` en
       `open`.
-- [ ] Mantener y limpiar el conjunto de sockets activos.
-- [ ] Envolver todos los callbacks con el error boundary común.
-- [ ] Construir un único `Bun.WebSocketHandler` reutilizado por el servidor.
+- [x] Mantener y limpiar el conjunto de sockets activos.
+- [x] Envolver todos los callbacks con el error boundary común.
+- [x] Construir un único `Bun.WebSocketHandler` reutilizado por el servidor.
 
 ### Fase 3 — Integración con `Server`
 
-- [ ] Agregar `WebSocketControllers?` a `TypeServerConstructor`.
-- [ ] Cambiar el handle interno a su tipo WebSocket real.
-- [ ] Componer upgrades en `routes` GET y `fetch` antes de HTTP.
-- [ ] Mantener idéntico el comportamiento cuando no se configura WebSocket.
-- [ ] Forwardear la configuración global al campo `websocket` de `Bun.serve()`.
-- [ ] Agregar `publish`, `subscriberCount`, `getPendingWebSockets`,
+- [x] Agregar `WebSocketControllers?` a `TypeServerConstructor`.
+- [x] Cambiar el handle interno a su tipo WebSocket real.
+- [x] Componer upgrades en `routes` GET y `fetch` antes de HTTP.
+- [x] Mantener idéntico el comportamiento cuando no se configura WebSocket.
+- [x] Forwardear la configuración global al campo `websocket` de `Bun.serve()`.
+- [x] Agregar `publish`, `subscriberCount`, `getPendingWebSockets`,
       `closeWebSockets` y `stop`.
-- [ ] Preservar los resultados numéricos y errores nativos relevantes.
-- [ ] Evitar un `as any` global; cualquier cast por limitación de tipos de Bun
+- [x] Preservar los resultados numéricos y errores nativos relevantes.
+- [x] Evitar un `as any` global; cualquier cast por limitación de tipos de Bun
       debe ser mínimo, localizado y explicado.
 
 ### Fase 4 — Modules y CoreStats
 
-- [ ] Descubrir `websockets/**/*.ts` sólo en módulos `full`.
-- [ ] Agregar el tipo de definición modular y `getWebSocketControllers()`.
-- [ ] Manejar `enabled`, ausencias, errores y warnings de directorios.
-- [ ] Registrar estadísticas de controllers y conexiones.
-- [ ] Extender `CoreStatsPayload` sin información sensible.
+- [x] Descubrir `websockets/**/*.ts` sólo en módulos `full`.
+- [x] Agregar el tipo de definición modular y `getWebSocketControllers()`.
+- [x] Manejar `enabled`, ausencias, errores y warnings de directorios.
+- [x] Registrar estadísticas de controllers y conexiones.
+- [x] Extender `CoreStatsPayload` sin información sensible.
 
 ### Fase 5 — Validación automatizada
 
-- [ ] Unit tests del matcher, precedencia, duplicados y wildcards.
-- [ ] Unit tests de aceptación/rechazo, headers y fallos de upgrade.
-- [ ] Unit tests de dispatch de cada fase y fallback de errores.
-- [ ] Unit tests de options, backpressure passthrough, métricas y lifecycle.
-- [ ] Tests del loader de módulos, incluida una definición deshabilitada o
+- [x] Unit tests del matcher, precedencia, duplicados y wildcards.
+- [x] Unit tests de aceptación/rechazo, headers y fallos de upgrade.
+- [x] Unit tests de dispatch de cada fase y fallback de errores.
+- [x] Unit tests de options, backpressure passthrough, métricas y lifecycle.
+- [x] Tests del loader de módulos, incluida una definición deshabilitada o
       inválida.
-- [ ] Integración HTTP + WebSocket en un único puerto efímero.
-- [ ] Integración con path params y `ws.data` tipado.
-- [ ] Integración de texto, binario, dos clientes, subscribe/publish y
+- [x] Integración HTTP + WebSocket en un único puerto efímero.
+- [x] Integración con path params y `ws.data` tipado.
+- [x] Integración de texto, binario, dos clientes, subscribe/publish y
       `publishToSelf`.
-- [ ] Integración de rechazo `401/403`, headers de upgrade y subprotocolo.
-- [ ] Integración de payload excedido y cierre.
-- [ ] Integración de cierre graceful y force sin procesos/listeners huérfanos.
-- [ ] Verificar que un route HTTP solapado no consume el upgrade.
-- [ ] Verificar que HTTP existente sigue funcionando sin configuración
+- [x] Integración de rechazo `401/403`, headers de upgrade y subprotocolo.
+- [x] Integración de payload excedido y cierre.
+- [x] Integración de cierre graceful y force sin procesos/listeners huérfanos.
+- [x] Verificar que un route HTTP solapado no consume el upgrade.
+- [x] Verificar que HTTP existente sigue funcionando sin configuración
       WebSocket.
 
 No se intentará producir backpressure real mediante sleeps frágiles en CI. Se
@@ -658,24 +659,24 @@ de carga manual reproducible para validar `drain`.
 
 ### Fase 6 — Documentación
 
-- [ ] Crear `DOCUMENTATION/WEBSOCKETS.md` y
+- [x] Crear `DOCUMENTATION/WEBSOCKETS.md` y
       `DOCUMENTATION/WEBSOCKETS.es.md`.
-- [ ] Crear mirrors `docs/content/en/WEBSOCKETS.md` y
+- [x] Crear mirrors `docs/content/en/WEBSOCKETS.md` y
       `docs/content/es/WEBSOCKETS.md` byte-for-byte.
-- [ ] Actualizar primero `DOCUMENTATION/ALL_EN.md` y su mirror website.
-- [ ] Actualizar `SERVER`, `MODULES`, `CLUSTER`, `CORESTATS`,
+- [x] Actualizar primero `DOCUMENTATION/ALL_EN.md` y su mirror website.
+- [x] Actualizar `SERVER`, `MODULES`, `CLUSTER`, `CORESTATS`,
       `GETTING_STARTED` y sus pares EN/ES.
-- [ ] Actualizar README/`FRAMEWORK` con la capacidad y un ejemplo mínimo.
-- [ ] Agregar WebSockets al catálogo de `docs/app.js`.
-- [ ] Documentar autenticación browser/Bun, proxies, backpressure, compresión,
+- [x] Actualizar README/`FRAMEWORK` con la capacidad y un ejemplo mínimo.
+- [x] Agregar WebSockets al catálogo de `docs/app.js`.
+- [x] Documentar autenticación browser/Bun, proxies, backpressure, compresión,
       límites, shutdown y frontera cluster.
-- [ ] Incluir una migración de sidecar a listener compartido.
-- [ ] Actualizar `CHANGELOG.md` bajo `[Unreleased]`.
+- [x] Incluir una migración de sidecar a listener compartido.
+- [x] Actualizar `CHANGELOG.md` bajo `[Unreleased]`.
 
 ### Fase 7 — Release
 
-- [ ] Tratar la API nueva como feature aditiva: release minor bajo SemVer.
-- [ ] No fijar ni subir versión mientras continúe entrando trabajo al bloque
+- [x] Tratar la API nueva como feature aditiva: release minor bajo SemVer.
+- [x] No fijar ni subir versión mientras continúe entrando trabajo al bloque
       `[Unreleased]`.
 - [ ] Antes del release, sincronizar versión en `package.json`, lockfile,
       README EN/ES, master docs, website/manifest y changelog.
@@ -685,6 +686,33 @@ de carga manual reproducible para validar `drain`.
       documentos publicados están incluidos.
 - [ ] Crear commits por cambios coherentes y un commit de release separado.
 - [ ] No publicar npm, taggear ni desplegar sin pedido explícito.
+
+### Resultado de ejecución al 2026-08-05
+
+Las fases 0–6 quedaron implementadas en commits coherentes: API/dispatcher,
+integración con `Server`, descubrimiento modular/CoreStats y documentación. La
+suite completa valida HTTP y WebSocket reales sobre el mismo listener, routing,
+handshake, lifecycle, pub/sub, límites y shutdown.
+
+Snapshot de preparación de release:
+
+- `bun run typecheck`, `bun run lint` y `bun test`: correctos; 121 tests y 424
+  expectativas.
+- Prettier, `git diff --check`, bundle browser de `docs/app.js`, links locales y
+  15 pares de mirrors: correctos.
+- `bun pm pack --dry-run`: 106 archivos; incluye los sources/types WebSocket y
+  `DOCUMENTATION/WEBSOCKETS.md` EN/ES.
+- `bun run typecheck:modules` conserva el fallo baseline anterior al alcance:
+  `modules/operators/controllers/operatorList.ts` no encuentra
+  `../events/emit` (`TS2307`).
+- La compatibilidad probada con Bun 1.3.14 requirió un registry propio para el
+  cierre graceful. El default HTTP histórico `idleTimeout: 300` sigue siendo
+  incompatible con el máximo `255` de ese runtime; los ejemplos usan `120` y
+  corregir el default queda fuera de este cambio.
+
+Los checks de la Fase 7 permanecen abiertos porque entrarán más cambios en
+`[Unreleased]`: deben repetirse sobre el commit exacto que se vaya a versionar.
+La versión continúa en `3.0.11`; no se creó tag, no se publicó y no se desplegó.
 
 ## 11. Criterios de aceptación
 

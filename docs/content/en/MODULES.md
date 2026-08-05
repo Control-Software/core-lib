@@ -68,16 +68,17 @@ exists.
 ### `share`
 
 Registers module metadata only. It does not automatically load services, types,
-models, controllers, events, or hooks. `controllers/`, `events/`, and `mws/`
-directories are ignored with a warning.
+models, controllers, events, WebSockets, or hooks. `controllers/`, `events/`,
+`mws/`, and `websockets/` directories are ignored with a warning.
 
 ### `full`
 
-Imports all TypeScript files under `controllers/` and optionally `events/`.
-Every controller file is expected to have a compatible default export.
+Imports all TypeScript files under `controllers/`, optional `websockets/`, and
+optional `events/`. Every controller file is expected to have a compatible
+default export.
 
-`initialize` is awaited after the type-specific load step. For `full`, this
-means after controllers and events.
+`initialize` is awaited after the type-specific load step. For `full`, the
+order is controllers, WebSocket controllers, events, then initialization.
 
 ## Constructor
 
@@ -128,6 +129,54 @@ handlers should not depend on awaiting it through this compatibility surface.
 Inject and use `EventsDomain` directly when publish completion is part of the
 application flow.
 
+## WebSocket controller files
+
+A `full` module may define any number of `websockets/**/*.ts` files:
+
+```ts
+import type { ModuleWebSocketControllerDefinition } from 's42-core'
+
+type OperatorSocketData = {
+	operatorId: string
+}
+
+export default {
+	name: 'operators.stream',
+	version: '1.0.0',
+	enabled: true,
+	path: '/ws/operators/:operatorId',
+	upgrade: ({ request, params }) => {
+		if (!isAuthorized(request, params.operatorId)) {
+			return new Response('Forbidden', { status: 403 })
+		}
+
+		return { data: { operatorId: params.operatorId } }
+	},
+	message: (ws, message) => ws.send(message),
+} satisfies ModuleWebSocketControllerDefinition<OperatorSocketData>
+```
+
+An enabled definition requires string `name` and `version`, a valid `path`, and
+an `upgrade` function. Optional lifecycle/error properties must be functions.
+`enabled: false` skips the file before controller construction. An invalid
+enabled definition rejects `load()` with its file and reason. A missing or empty
+`websockets/` directory is valid.
+
+Retrieve constructed controllers with `getWebSocketControllers()` and pass
+them explicitly to a registry:
+
+```ts
+const sockets = new WebSocketControllers(modules.getWebSocketControllers())
+await server.start({ port: 5678, WebSocketControllers: sockets })
+```
+
+HTTP `mws`, global hooks, and controller `requireBefore`/`requireAfter` are not
+applied to WebSocket handshakes or lifecycle callbacks. Authentication belongs
+in the required `upgrade` callback. The loader does not inject the HTTP
+`events.emit` context into WebSocket definitions.
+
+See [WEBSOCKETS](./WEBSOCKETS.md) for the complete runtime contract.
+
 ## Event files
 
 When an `EventsDomain` is configured:
@@ -155,6 +204,7 @@ Prefer explicit `EVENTS` mappings for stable contracts.
 - `load()`
 - `setEventsDomain(eventsDomain): this`
 - `getControllers()`
+- `getWebSocketControllers()`
 - `getHooks()`
 - `getSharedModules()`
 - `getLoadedModules()`
@@ -174,7 +224,8 @@ Prefer explicit `EVENTS` mappings for stable contracts.
   `getHooks()` is not populated by those modules.
 - Models, services, and types are not auto-discovered; their getters return
   empty collections or `undefined`.
-- A missing `controllers/` or `events/` directory is allowed for `full`.
+- A missing `controllers/`, `websockets/`, or `events/` directory is allowed for
+  `full`.
 - A missing or invalid `mws/index.ts` contract throws and stops `load()`.
 - `setEventsDomain()` must be called before `load()` to register event files.
   Setting it afterwards does not retroactively scan skipped events.
@@ -188,3 +239,6 @@ Prefer explicit `EVENTS` mappings for stable contracts.
 
 `getModulesStats()` returns totals by type, module names, and the normalized
 loaded manifests. Its registry is process-wide.
+
+WebSocket controller and active-connection statistics use the separate
+process-wide `getWebSocketControllersStats()` registry.

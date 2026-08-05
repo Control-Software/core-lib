@@ -109,7 +109,42 @@ await new Server().start({
 enabled `mws`, `share`, then `full` modules. Read [Modules](./MODULES.md) before
 depending on middleware or event-file conventions.
 
-## 4. Make an atomic SQL change
+## 4. Add a native WebSocket route
+
+```ts
+import { Server, WebSocketController, WebSocketControllers } from 's42-core'
+
+const notifications = new WebSocketController<{ userId: string }>({
+	path: '/ws/notifications',
+	async upgrade({ request }) {
+		const session = await authenticate(request)
+		if (!session) return new Response('Unauthorized', { status: 401 })
+		return { data: { userId: session.userId } }
+	},
+	open(ws) {
+		ws.subscribe(`user:${ws.data.userId}`)
+	},
+})
+
+const server = new Server()
+await server.start({
+	port: 3000,
+	idleTimeout: 120,
+	WebSocketControllers: new WebSocketControllers([notifications], {
+		maxPayloadLength: 1024 * 1024,
+		idleTimeout: 60,
+	}),
+})
+
+server.publish('user:42', 'refresh')
+```
+
+The required `upgrade` callback is the authentication/authorization boundary.
+HTTP hooks and module `mws` do not run for WebSocket handshakes. Validate
+browser `Origin`, configure payload/backpressure limits, and use `wss://` in
+production. Continue with [WebSockets](./WEBSOCKETS.md).
+
+## 5. Make an atomic SQL change
 
 ```ts
 import { SQL, isSQLError } from 's42-core'
@@ -154,7 +189,7 @@ or a retry policy. Read the complete [SQL guide](./SQL.md) for filters,
 savepoints, distributed transactions, raw execution, indexes, errors, and
 adapter differences.
 
-## 5. Publish a domain event
+## 6. Publish a domain event
 
 ```ts
 import { EventsDomain, RedisClient } from 's42-core'
@@ -182,10 +217,12 @@ queue topology with explicit retry/dead-letter semantics when delivery is a
 business invariant. See [EventsDomain](./EVENTSDOMAIN.md) and
 [Redis](./REDISDB.md).
 
-## 6. Production checklist
+## 7. Production checklist
 
 - Provide a sanitized `Server.error` callback.
 - Enforce your CORS policy at a trusted boundary; router CORS headers are fixed.
+- Authenticate WebSockets in `upgrade`, validate browser `Origin`, and set
+  payload/backpressure/idle limits.
 - Call explicit database `connect()` methods during startup and close clients
   during shutdown.
 - Validate and cap pagination inputs at the HTTP boundary.

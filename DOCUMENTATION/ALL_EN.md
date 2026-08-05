@@ -1,13 +1,13 @@
 # S42-Core Master Documentation (ALL_EN)
 
-Last reviewed against all `src/` files: 2026-08-03
+Last reviewed against all `src/` files: 2026-08-05
 Package baseline: `s42-core@3.0.11`
 Runtime requirement: Bun `>=1.3.0`
 
 This document is the primary technical overview of the repository. It describes
 the behavior implemented by `src/`, not an aspirational API.
 
-Audit scope: all 46 TypeScript source/test files under `src/`, the root package
+Audit scope: all 53 TypeScript source/test files under `src/`, the root package
 exports, every component guide in `DOCUMENTATION/`, and the website mirrors.
 Repository-only helpers are documented explicitly as internal rather than
 presented as supported deep imports.
@@ -16,7 +16,7 @@ presented as supported deep imports.
 
 S42-Core is a Bun-first TypeScript framework for:
 
-- HTTP services based on `Bun.serve` and Web `Request`/`Response`.
+- HTTP and native multi-route WebSocket services based on `Bun.serve`.
 - Convention-based, module-oriented service composition.
 - Distributed domain events through Redis or SQS adapters.
 - MongoDB, Redis/Valkey, PostgreSQL, MySQL, and SQLite access.
@@ -29,18 +29,20 @@ boundary is the root export map in `package.json`, backed by `src/index.ts`.
 
 ### 2.1 Runtime values exported from `s42-core`
 
-| Area            | Exports                                                                   |
-| --------------- | ------------------------------------------------------------------------- |
-| HTTP            | `Server`, `RouteControllers`, `Controller`, `Res`, `getControllersStats`  |
-| Modules         | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats` |
-| Events          | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                  |
-| Data            | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `Dependencies`             |
-| Runtime         | `Cluster`, `SSE`, `CoreStats`                                             |
-| Logging/testing | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`              |
+| Area            | Exports                                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| HTTP/realtime   | `Server`, `RouteControllers`, `Controller`, `Res`, `WebSocketController`, `WebSocketControllers`, HTTP/WebSocket statistics |
+| Modules         | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats`                                                   |
+| Events          | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                                                                    |
+| Data            | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `Dependencies`                                                               |
+| Runtime         | `Cluster`, `SSE`, `CoreStats`                                                                                               |
+| Logging/testing | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`                                                                |
 
 The root entrypoint also exports these public type families:
 
 - CoreStats command, payload, system, memory, disk, endpoint, and module types.
+- Typed WebSocket data, peer, message, lifecycle, error, upgrade, server-option,
+  module-definition, publication, and statistics contracts.
 - Logger `LogLevel` and `LogSink`.
 - SQS adapter options.
 - Controller and module statistics plus module model/service/controller types.
@@ -75,7 +77,7 @@ bun add s42-core
 ```
 
 ```ts
-import { Modules, RouteControllers, Server } from 's42-core'
+import { Modules, RouteControllers, Server, WebSocketControllers } from 's42-core'
 
 const modules = new Modules('./modules')
 await modules.load()
@@ -83,7 +85,9 @@ await modules.load()
 const server = new Server()
 await server.start({
 	port: 5678,
+	idleTimeout: 120,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	WebSocketControllers: new WebSocketControllers(modules.getWebSocketControllers()),
 	hooks: modules.getHooks(),
 })
 
@@ -91,8 +95,9 @@ console.info(server.getURL())
 ```
 
 `Server.start()` resolves after `Bun.serve` has been created (and, when
-requested, after the cluster start signal). S42-Core currently does not expose a
-public `Server.stop()` wrapper.
+requested, after the cluster start signal). `Server.stop(force?)` shuts down the
+listener; WebSocket services can first call `closeWebSockets()` for a graceful
+close frame.
 
 The repository includes this local module demo entrypoint:
 
@@ -114,7 +119,9 @@ Typical startup:
 3. Create `EventsDomain` if modules use events.
 4. Create `Modules(path, eventsDomain?)` and call `load()`.
 5. Create `RouteControllers` from `modules.getControllers()`.
-6. Start `Server`.
+6. Optionally create `WebSocketControllers` from
+   `modules.getWebSocketControllers()`.
+7. Start `Server`.
 
 Typical HTTP request:
 
@@ -127,6 +134,17 @@ Typical HTTP request:
 7. Controller-specific `mws` after handlers run.
 8. Matching global `after` hooks run.
 9. The original controller response is returned.
+
+Typical WebSocket connection:
+
+1. A native `GET` route or fallback detects `Upgrade: websocket` before HTTP.
+2. The registry applies exact, parameterized, then terminal-wildcard matching.
+3. The required route `upgrade` callback authenticates and returns either an
+   HTTP `Response` rejection or `{ data, headers? }`.
+4. Bun upgrades on the same listener and the shared handler dispatches to the
+   selected controller.
+5. `open`, `message`, `drain`, `ping`, `pong`, and `close` receive the native
+   `Bun.ServerWebSocket` with route-typed `ws.data`.
 
 Typical domain event:
 
@@ -227,19 +245,20 @@ The loader auto-advances when a middleware does not call `next()`.
 #### `share`
 
 A `share` module registers metadata only. It does not automatically import
-services, types, models, controllers, events, or middleware. Code inside the
-module remains available through normal project imports.
+services, types, models, controllers, events, WebSockets, or middleware. Code
+inside the module remains available through normal project imports.
 
-If a `share` module contains `controllers/`, `events/`, or `mws/`, those
-directories are ignored and a warning is logged when detected.
+If a `share` module contains `controllers/`, `events/`, `mws/`, or
+`websockets/`, those directories are ignored and a warning is logged.
 
 #### `full`
 
 A `full` module:
 
 - imports every `*.ts` file below `controllers/`;
+- optionally imports WebSocket definitions below `websockets/`;
 - optionally imports event files below `events/`;
-- runs `initialize` after controllers and events are processed.
+- runs `initialize` after controllers, WebSockets, and events are processed.
 
 Each controller file must default-export controller metadata:
 
@@ -280,7 +299,33 @@ Important current behavior:
 - Every TypeScript file under `controllers/` is imported and expected to have a
   compatible default export.
 
-### 5.3 Controller-level middleware
+### 5.3 WebSocket files
+
+Every enabled `websockets/**/*.ts` file in a `full` module default-exports a
+definition:
+
+```ts
+import type { ModuleWebSocketControllerDefinition } from 's42-core'
+
+type StreamData = { operatorId: string }
+
+export default {
+	name: 'operators.stream',
+	version: '1.0.0',
+	enabled: true,
+	path: '/ws/operators/:operatorId',
+	upgrade: ({ params }) => ({ data: { operatorId: params.operatorId } }),
+	message: (ws, message) => ws.send(message),
+} satisfies ModuleWebSocketControllerDefinition<StreamData>
+```
+
+`enabled: false` skips construction. Invalid enabled definitions reject
+`load()` with the file and reason. A missing directory is valid. The resulting
+controllers are returned by `getWebSocketControllers()` and must be passed to a
+`WebSocketControllers` registry. HTTP middleware/hooks and the controller
+`events.emit` facade are not injected into WebSocket handlers.
+
+### 5.4 Controller-level middleware
 
 Middleware modules are opt-in per controller:
 
@@ -305,7 +350,7 @@ requireBefore: ['mws'] // every loaded middleware module
 References are de-duplicated. An unknown middleware name logs a warning and is
 skipped.
 
-### 5.4 Events inside module controllers
+### 5.5 Events inside module controllers
 
 The handler context exposes:
 
@@ -327,7 +372,7 @@ module "operators" + "Operator$List$Completed"
 If no `EventsDomain` was passed to `Modules`, controller execution continues but
 this facade has no configured event bus.
 
-### 5.5 Event file conventions
+### 5.6 Event file conventions
 
 With an `EventsDomain` configured:
 
@@ -355,13 +400,14 @@ export async function onApproved(event: EventType) {
 }
 ```
 
-### 5.6 `Modules` API and current compatibility getters
+### 5.7 `Modules` API and current compatibility getters
 
 Instance methods:
 
 - `load()`
 - `setEventsDomain(eventsDomain)`
 - `getControllers()`
+- `getWebSocketControllers()`
 - `getHooks()`
 - `getSharedModules()`
 - `getLoadedModules()`
@@ -379,7 +425,7 @@ Current compatibility details:
 - Models, services, and types are not auto-discovered; their getters currently
   return empty collections or `undefined`.
 
-## 6. HTTP Layer
+## 6. HTTP and Realtime Layer
 
 ### 6.1 `Server`
 
@@ -387,10 +433,11 @@ Current compatibility details:
 await server.start({
 	port: 5678,
 	clustering: false,
-	idleTimeout: 300,
+	idleTimeout: 120,
 	maxRequestBodySize: 1_000_000,
 	hooks: [],
 	RouteControllers: router,
+	WebSocketControllers: sockets,
 	development: false,
 	awaitForCluster: false,
 	error: () => new Response('Internal Server Error', { status: 500 }),
@@ -399,19 +446,24 @@ await server.start({
 
 Options and defaults:
 
-| Option               |                Default | Meaning                                                  |
-| -------------------- | ---------------------: | -------------------------------------------------------- |
-| `port`               |         `0` at runtime | Bun listener port; TypeScript contract requires a number |
-| `clustering`         |                `false` | Passed to Bun as `reusePort`                             |
-| `idleTimeout`        |                  `300` | Bun idle timeout                                         |
-| `maxRequestBodySize` |            `1_000_000` | Maximum request body bytes                               |
-| `hooks`              |                   `[]` | Global route hooks                                       |
-| `RouteControllers`   |                   none | Router and route-map source                              |
-| `development`        |                `false` | Bun development mode                                     |
-| `awaitForCluster`    |                `false` | Wait for cluster `start` IPC command                     |
-| `error`              | built-in HTML response | Bun error handler override                               |
+| Option                 |                Default | Meaning                                                  |
+| ---------------------- | ---------------------: | -------------------------------------------------------- |
+| `port`                 |         `0` at runtime | Bun listener port; TypeScript contract requires a number |
+| `clustering`           |                `false` | Passed to Bun as `reusePort`                             |
+| `idleTimeout`          |                  `300` | Bun idle timeout                                         |
+| `maxRequestBodySize`   |            `1_000_000` | Maximum request body bytes                               |
+| `hooks`                |                   `[]` | Global route hooks                                       |
+| `RouteControllers`     |                   none | Router and route-map source                              |
+| `WebSocketControllers` |                   none | WebSocket route registry and shared Bun handler          |
+| `development`          |                `false` | Bun development mode                                     |
+| `awaitForCluster`      |                `false` | Wait for cluster `start` IPC command                     |
+| `error`                | built-in HTML response | Bun error handler override                               |
 
-Without `RouteControllers`, the server returns plain-text `404` responses.
+Without `RouteControllers`, non-upgrade HTTP requests receive plain-text `404`
+responses.
+The source default for listener `idleTimeout` is `300`, while Bun 1.3.14 rejects
+values above `255`; pass an explicit supported value such as `120` on that
+runtime. WebSocket idle timeout is a separate registry option.
 
 Security note: the built-in error handler includes the error message and stack
 in an HTML response. Production services should pass a sanitizing `error`
@@ -421,13 +473,81 @@ Helpers:
 
 - `getPort()`
 - `getURL()`
+- `publish(topic, data, compress?)`
+- `subscriberCount(topic)`
+- `getPendingWebSockets()`
+- `closeWebSockets(code?, reason?)`
+- `stop(force?)`
 - `isStartedFromCluster()`
 - `getClusterName()`
 - `sendMessageToCluster(message)`
 - `sendMessageToWorkers(message)`
 - `onMessageFromWorkers(callback)`
 
-### 6.2 `RouteControllers`
+Publication and subscription counts are process-local. `publish()` and
+`subscriberCount()` throw outside the started lifecycle. `stop(false)` is
+graceful; `stop(true)` forces active work. The wrapper accounts for Bun 1.3.14
+WebSocket stop/pending-counter behavior while still invoking the native stop.
+
+### 6.2 Native WebSockets
+
+```ts
+const route = new WebSocketController<{ userId: string }>({
+	path: '/ws/users/:userId',
+	upgrade({ request, params }) {
+		if (!authorize(request, params.userId)) {
+			return new Response('Forbidden', { status: 403 })
+		}
+		return { data: { userId: params.userId } }
+	},
+	message: (ws, message) => ws.send(message),
+})
+
+const sockets = new WebSocketControllers([route], {
+	maxPayloadLength: 1024 * 1024,
+	idleTimeout: 60,
+	backpressureLimit: 1024 * 1024,
+	closeOnBackpressureLimit: true,
+})
+```
+
+The registry supports exact, `:param`, and terminal `*` paths with exact,
+parameterized, then wildcard precedence. Duplicate or structurally equivalent
+ambiguous routes fail construction. Only `GET` requests with
+`Upgrade: websocket` enter matching. Native HTTP `GET` handlers and the
+fallback both try the upgrade before HTTP, so both transports may share a path.
+
+`upgrade` is required. It receives raw `request`, `url`, readonly `params`,
+`query`, and Bun `remoteAddress`. A `Response` rejects before `101`;
+`{ data, headers? }` accepts. Data must be a non-null, non-array object and is
+available as flat, route-typed `ws.data` in all lifecycle callbacks.
+
+The native peer is not wrapped. Applications retain Bun `send`, binary,
+ping/pong, compression, buffering, close, cork, and topic APIs. Supported
+callbacks are `open`, optional `message`, `drain`, `close`, `ping`, `pong`, and
+framework `handleError`. Unhandled application errors are logged without their
+message/payload and close an open socket with `1011`; `upgrade` failures return
+a sanitized `500` unless `handleError` returns a `Response`.
+
+Native send/publish results remain `-1` for backpressure, `0` for dropped, and
+positive for bytes sent. There are no automatic retries or application queues.
+Global options forward payload/backpressure limits, timeout, pings,
+`publishToSelf`, and per-message deflate without replacing Bun defaults.
+
+HTTP hooks, module `mws`, and `requireBefore`/`requireAfter` do not execute for
+WebSocket. Authenticate, authorize, validate browser `Origin`, and negotiate an
+allow-listed subprotocol in `upgrade`. Browser clients cannot add arbitrary
+headers; avoid durable credentials in query strings.
+
+For shutdown, call `closeWebSockets()` and `stop()`, with an application timeout
+that can call `stop(true)`. Native topics, subscribers, publication, metrics,
+and socket tracking are local to one worker. Use an explicit external event
+bridge for cross-worker broadcast.
+
+See [WEBSOCKETS](./WEBSOCKETS.md) for the complete API, module convention,
+security checklist, client behavior, and sidecar migration.
+
+### 6.3 `RouteControllers`
 
 ```ts
 const router = new RouteControllers(controllers)
@@ -513,7 +633,7 @@ trusted reverse proxy or an approved routing layer.
 `OPTIONS` returns `204` only after the request reaches `dispatchRoute`; an
 unregistered `OPTIONS` method can still miss route matching and return `404`.
 
-### 6.3 `Controller`
+### 6.4 `Controller`
 
 ```ts
 const endpoint = new Controller('GET', '/health', async (_req, res) => {
@@ -540,7 +660,7 @@ Every constructed `Controller` is tracked in the process-wide controller
 statistics registry. `getControllersStats()` de-duplicates endpoint
 method/path pairs and sorts them by path and method.
 
-### 6.4 `Res`
+### 6.5 `Res`
 
 `Res` builds Web `Response` instances:
 
@@ -1216,9 +1336,15 @@ Public API:
 - `getCurrentFile`
 - `getCurrentWorkers`
 
-There is currently no public stop method, worker restart policy, readiness
-coordination, or rolling-restart mechanism. Worker servers must use
+There is currently no public `Cluster.stop()` method, worker restart policy,
+readiness coordination, or rolling-restart mechanism. Worker servers must use
 `clustering: true` to enable Bun `reusePort`.
+
+Each upgraded WebSocket remains in one worker. Native topics,
+`server.publish()`, subscriber counts, connection metrics, and coordinated
+close are process-local. `reusePort` distributes new connections on supported
+Linux deployments and is ignored by Bun on macOS/Windows. Cross-worker rooms
+need an explicit Redis/SQS/EventsDomain bridge into each worker's local publish.
 
 ### 9.2 `SSE`
 
@@ -1279,6 +1405,7 @@ exists.
 The payload contains:
 
 - controller and endpoint counts;
+- WebSocket controller paths and active connection counts;
 - loaded module counts and manifests;
 - `free -m`, `df -h`, `uptime`, `who`, and
   `cpupower frequency-info` output.
@@ -1289,6 +1416,8 @@ Missing host commands do not fail the endpoint; their sections report
 Security: the route adds no authentication or authorization and exposes host
 details, connected-user output, route inventory, and module metadata. Keep it
 disabled on public services unless access is protected by a trusted layer.
+The WebSocket inventory omits topics, IPs, headers, query values, payloads, and
+`ws.data`.
 
 Manual API:
 
@@ -1374,8 +1503,11 @@ current implementation contract.
   the module-middleware or global-hook pipelines.
 - The generic controller error response includes the thrown value and route
   path. Catch and sanitize expected failures before that boundary.
+- `websockets/**/*.ts` is validated separately from HTTP controller metadata.
+  Disabled definitions are skipped; invalid enabled definitions fail with file
+  and reason. WebSocket handlers receive no implicit middleware/event context.
 
-### 10.2 HTTP request and server lifecycle
+### 10.2 HTTP/WebSocket request and server lifecycle
 
 - Global route hooks receive the raw Web `Request`; controller callbacks receive
   the normalized request object. The hook `res` argument is a runtime `Res`
@@ -1386,7 +1518,14 @@ current implementation contract.
 - A route wildcard consumes the remaining suffix from its first `*` segment.
 - `Server.start({ awaitForCluster: true })` creates the Bun listener before
   waiting for the parent signal. Repeated `start()` calls are not guarded and
-  the wrapper exposes neither the native handle nor `stop()`.
+  can orphan the previously stored handle.
+- WebSocket routing runs before HTTP only for `GET` plus
+  `Upgrade: websocket`; a non-upgrade request follows normal HTTP behavior.
+- WebSocket authorization is independent of HTTP hooks and module `mws`.
+- `closeWebSockets()` tracks framework-upgraded sockets. `stop(false)` is
+  graceful and `stop(true)` is forced; S42-Core works around Bun 1.3.14 native
+  stop promises/pending counters without exposing the complete native handle.
+- WebSocket pub/sub, metrics, and registries are local to each worker.
 
 ### 10.3 Event delivery
 
@@ -1443,6 +1582,10 @@ current implementation contract.
 ## 11. Production Review Checklist
 
 - Provide a sanitized `Server.error` handler.
+- Authenticate/authorize WebSockets in `upgrade`, validate cookie-authenticated
+  browser origins, and allow-list subprotocols.
+- Configure WebSocket payload, backpressure, and idle limits; do not put durable
+  credentials in query strings.
 - Enforce an explicit CORS policy outside the current fixed router headers.
 - Trust forwarded IP headers only behind a controlled proxy.
 - Keep `CoreStats` disabled or authenticated and network-restricted.
@@ -1453,6 +1596,8 @@ current implementation contract.
   outbox/queue contract for durable business events.
 - Treat singleton configuration as immutable after first initialization.
 - Close MongoDB, Redis, SQLite, event, and worker resources explicitly.
+- Close WebSockets gracefully, then use an application timeout with forced
+  `Server.stop(true)` fallback.
 - Use the logger sink for protected structured diagnostics.
 - Test PostgreSQL, MySQL, SQS, and external-service behavior against the actual
   deployment environment; unit tests do not prove provider connectivity.
@@ -1463,6 +1608,9 @@ current implementation contract.
 - After hooks cannot alter the controller response.
 - `RouteControllers` CORS headers are fixed and permissive.
 - The default server error page exposes stack details.
+- The source `Server.idleTimeout` default is `300`, but Bun 1.3.14 accepts at
+  most `255`; pass an explicit supported value until that default is changed.
+- HTTP hooks do not run for WebSocket and native pub/sub is process-local.
 - Module `dependencies` is metadata only.
 - Controller-level `enabled` is not enforced by the loader.
 - Models/services/types are not auto-discovered.
@@ -1523,6 +1671,7 @@ Component documents:
 - [ROUTECONTROLLERS](./ROUTECONTROLLERS.md)
 - [CONTROLLER](./CONTROLLER.md)
 - [RESPONSE](./RESPONSE.md)
+- [WEBSOCKETS](./WEBSOCKETS.md)
 - [MODULES](./MODULES.md)
 - [CLUSTER](./CLUSTER.md)
 - [EVENTSDOMAIN](./EVENTSDOMAIN.md)

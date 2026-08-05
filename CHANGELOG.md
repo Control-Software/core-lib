@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Native server WebSockets:** added typed `WebSocketController<TData>` routes
+  and a shared `WebSocketControllers` dispatcher on the existing `Bun.serve`
+  listener. Handshakes support exact/parameter/wildcard matching, typed flat
+  `ws.data`, HTTP rejection responses, upgrade headers,
+  `open`/`message`/`drain`/`close`/`ping`/`pong`, sanitized application error
+  handling, native backpressure, compression, and process-local pub/sub. `Server` now exposes `publish`,
+  `subscriberCount`, `getPendingWebSockets`, `closeWebSockets`, and graceful or
+  forced `stop`. Full modules discover validated `websockets/**/*.ts`
+  definitions, and CoreStats reports non-sensitive route/connection counts.
 - **SQL native driver options and rotating credentials:** `TypeSQLConnection`
   now accepts PostgreSQL/MySQL `driverOptions`, shallow-merged after the
   top-level fields. This exposes Bun-native host configuration, TLS/SNI, and

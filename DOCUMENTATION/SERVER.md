@@ -2,8 +2,9 @@
 
 ## Purpose
 
-`Server` wraps `Bun.serve` and connects the HTTP listener to
-`RouteControllers`, global hooks, and cluster IPC.
+`Server` wraps `Bun.serve` and connects one listener to HTTP
+`RouteControllers`, native WebSocket controllers, global HTTP hooks, and
+cluster IPC.
 
 ## Constructor
 
@@ -19,36 +20,47 @@ The constructor takes no arguments and registers the worker-side IPC listener.
 await server.start({
 	port: 5678,
 	clustering: false,
-	idleTimeout: 300,
+	idleTimeout: 120,
 	maxRequestBodySize: 1_000_000,
 	hooks: [],
 	RouteControllers: router,
+	WebSocketControllers: sockets,
 	development: false,
 	awaitForCluster: false,
 	error: () => new Response('Internal Server Error', { status: 500 }),
 })
 ```
 
-| Option               |     Runtime default | Behavior                                           |
-| -------------------- | ------------------: | -------------------------------------------------- |
-| `port`               |                 `0` | Listener port; the TypeScript contract requires it |
-| `clustering`         |             `false` | Passed to Bun as `reusePort`                       |
-| `idleTimeout`        |               `300` | Bun connection idle timeout                        |
-| `maxRequestBodySize` |         `1_000_000` | Maximum request body bytes                         |
-| `hooks`              |                `[]` | Global route hooks                                 |
-| `RouteControllers`   |                none | Route map and fallback callback                    |
-| `development`        |             `false` | Bun development mode                               |
-| `awaitForCluster`    |             `false` | Wait for a parent `start` IPC command              |
-| `error`              | built-in HTML error | Bun error handler override                         |
+| Option                 |     Runtime default | Behavior                                           |
+| ---------------------- | ------------------: | -------------------------------------------------- |
+| `port`                 |                 `0` | Listener port; the TypeScript contract requires it |
+| `clustering`           |             `false` | Passed to Bun as `reusePort`                       |
+| `idleTimeout`          |               `300` | Bun connection idle timeout                        |
+| `maxRequestBodySize`   |         `1_000_000` | Maximum request body bytes                         |
+| `hooks`                |                `[]` | Global route hooks                                 |
+| `RouteControllers`     |                none | Route map and fallback callback                    |
+| `WebSocketControllers` |                none | WebSocket routes and singleton Bun handler         |
+| `development`          |             `false` | Bun development mode                               |
+| `awaitForCluster`      |             `false` | Wait for a parent `start` IPC command              |
+| `error`                | built-in HTML error | Bun error handler override                         |
 
-Without `RouteControllers`, every request receives a plain-text `404`.
+Without `RouteControllers`, every non-upgrade HTTP request receives a plain-text
+`404`.
+
+The source default for the HTTP listener `idleTimeout` remains `300`. Bun
+1.3.14 accepts values only through `255`, so applications on the supported
+runtime must currently pass an explicit valid value such as `120`. The
+WebSocket handler has a separate `idleTimeout` configured on
+`WebSocketControllers`.
 
 ## Runtime behavior
 
 1. Builds the fallback callback with `RouteControllers.getCallback(hooks)`.
 2. Builds the Bun native route map with `RouteControllers.getRoutes(hooks)`.
-3. Starts `Bun.serve` with both `routes` and `fetch`.
-4. When `awaitForCluster` is enabled, creates the listener first and then keeps
+3. When WebSockets are configured, wraps every native HTTP `GET`, adds native
+   entries for WebSocket-only paths, and checks the fallback before HTTP.
+4. Starts `Bun.serve` with `routes`, `fetch`, and one shared `websocket` handler.
+5. When `awaitForCluster` is enabled, creates the listener first and then keeps
    the `start()` promise pending until the parent sends `start`.
 
 Without cluster waiting, `start()` resolves after `Bun.serve` has created the
@@ -59,6 +71,11 @@ overwrites the stored handle without stopping the previous Bun server.
 
 - `getPort(): number | undefined`
 - `getURL(): string | undefined`
+- `publish(topic, data, compress?): Bun.ServerWebSocketSendStatus`
+- `subscriberCount(topic): number`
+- `getPendingWebSockets(): number`
+- `closeWebSockets(code?, reason?): number`
+- `stop(force?): Promise<void>`
 - `isStartedFromCluster(): boolean`
 - `getClusterName(): string`
 - `sendMessageToCluster(message): void`
@@ -67,6 +84,10 @@ overwrites the stored handle without stopping the previous Bun server.
 
 `sendMessageToCluster()` and `sendMessageToWorkers()` only operate when
 `process.send` exists. Otherwise they log a warning.
+
+`publish()` and `subscriberCount()` delegate to Bun and throw before the server
+starts or after it stops. Publication and subscriber counts are process-local.
+`getPendingWebSockets()` returns `0` outside the started lifecycle.
 
 ## Minimal example
 
@@ -93,11 +114,17 @@ console.info(server.getURL())
   internal error separately.
 - `development` is forwarded to Bun; it is not a substitute for a sanitized
   production error policy.
-- There is currently no public `stop()` method on the wrapper.
-- Because the wrapper does not expose the native server handle, applications
-  cannot drain or stop it through S42-Core. Keep a separate Bun server surface
-  when graceful listener shutdown is mandatory.
+- `stop(false)` initiates Bun's graceful stop and waits for in-flight HTTP and
+  WebSocket activity. `stop(true)` forces active work closed.
+- For graceful WebSocket shutdown, call `closeWebSockets(1001, reason)`, start
+  `stop()`, and use an application timeout that can call `stop(true)`.
+- S42-Core accounts for Bun 1.3.14 stop promises and stale WebSocket pending
+  counters through its own connection registry; the native handle still
+  performs the actual stop.
 - The constructor installs a process `message` listener and does not expose a
   method to remove it.
 - A clustered worker server must use `clustering: true` so Bun enables
   `reusePort`.
+
+See [WEBSOCKETS](./WEBSOCKETS.md) for routing, authentication, lifecycle,
+backpressure, pub/sub, modules, cluster boundaries, and security.

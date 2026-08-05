@@ -2,8 +2,8 @@
 
 ## Propósito
 
-`CoreStats` informa los registros de controllers/módulos de S42-Core y output de
-comandos del host.
+`CoreStats` informa el estado de controllers HTTP, controllers WebSocket,
+módulos y comandos del host.
 
 ## Ruta automática
 
@@ -38,6 +38,7 @@ al router existente.
 `CoreStats` no agrega autenticación ni autorización. Su respuesta expone:
 
 - todos los endpoints registrados;
+- todos los paths WebSocket registrados y su cantidad de conexiones activas;
 - nombres, versiones, tipos y manifest de módulos cargados;
 - output de memoria y disco;
 - uptime;
@@ -95,7 +96,8 @@ Incluye:
 
 - `generatedAt`, `path` y `enabled`;
 - totales de controllers, endpoints y módulos por tipo;
-- arrays `endpoints` y `modules`;
+- totales de controllers y conexiones WebSocket;
+- arrays `endpoints` y `modules`, más `webSockets.routes`;
 - `system.memory`, `system.disk`, `system.uptime`,
   `system.connectedUsers` y `system.cpuFrequency`;
 - para cada comando, `ok` y `raw`.
@@ -116,6 +118,10 @@ todo el payload como información operacional sensible.
 
 ## Comportamiento del registro
 
-Las estadísticas de controllers y módulos son globales al proceso. Un
-controller se registra al construirse y un módulo al cargarse. En un cluster
-multiproceso, cada worker informa el estado de su propio proceso.
+Las estadísticas de controllers HTTP, controllers WebSocket, conexiones activas
+y módulos son globales al proceso. Un controller se registra al construirse,
+las conexiones cambian en `open`/`close` y un módulo se registra al cargarse. En
+un cluster multiproceso, cada worker informa su propio estado.
+
+La sección WebSocket excluye deliberadamente topics, IPs, headers, valores de
+query, payloads y `ws.data`.

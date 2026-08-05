@@ -69,16 +69,17 @@ si existe.
 ### `share`
 
 Registra solamente metadata del módulo. No carga automáticamente services,
-types, models, controllers, eventos ni hooks. Los directorios `controllers/`,
-`events/` y `mws/` se ignoran con un warning.
+types, models, controllers, eventos, WebSockets ni hooks. Los directorios
+`controllers/`, `events/`, `mws/` y `websockets/` se ignoran con un warning.
 
 ### `full`
 
-Importa todos los archivos TypeScript bajo `controllers/` y opcionalmente
-`events/`. Cada archivo de controlador debe tener un default export compatible.
+Importa todos los archivos TypeScript bajo `controllers/`, opcionalmente
+`websockets/` y opcionalmente `events/`. Cada archivo de controlador debe tener
+un default export compatible.
 
-`initialize` se espera después de la carga propia del tipo. Para `full`, esto
-ocurre luego de controllers y eventos.
+`initialize` se espera después de la carga propia del tipo. Para `full`, el
+orden es controllers, controllers WebSocket, eventos e inicialización.
 
 ## Constructor
 
@@ -130,6 +131,54 @@ pero los handlers de módulo no deben depender de esperarla mediante esta
 superficie de compatibilidad. Inyectar y usar `EventsDomain` directamente cuando
 la finalización de la publicación sea parte del flujo de la aplicación.
 
+## Archivos de controller WebSocket
+
+Un módulo `full` puede definir múltiples archivos `websockets/**/*.ts`:
+
+```ts
+import type { ModuleWebSocketControllerDefinition } from 's42-core'
+
+type OperatorSocketData = {
+	operatorId: string
+}
+
+export default {
+	name: 'operators.stream',
+	version: '1.0.0',
+	enabled: true,
+	path: '/ws/operators/:operatorId',
+	upgrade: ({ request, params }) => {
+		if (!isAuthorized(request, params.operatorId)) {
+			return new Response('Forbidden', { status: 403 })
+		}
+
+		return { data: { operatorId: params.operatorId } }
+	},
+	message: (ws, message) => ws.send(message),
+} satisfies ModuleWebSocketControllerDefinition<OperatorSocketData>
+```
+
+Una definición habilitada requiere `name` y `version` string, `path` válido y
+una función `upgrade`. Las propiedades opcionales de lifecycle/error deben ser
+funciones. `enabled: false` omite el archivo antes de construir el controller.
+Una definición habilitada inválida rechaza `load()` con archivo y motivo. Un
+directorio `websockets/` ausente o vacío es válido.
+
+Obtener los controllers con `getWebSocketControllers()` y pasarlos
+explícitamente a un registro:
+
+```ts
+const sockets = new WebSocketControllers(modules.getWebSocketControllers())
+await server.start({ port: 5678, WebSocketControllers: sockets })
+```
+
+Los `mws` HTTP, hooks globales y `requireBefore`/`requireAfter` de controllers no
+se aplican al handshake ni lifecycle WebSocket. La autenticación debe vivir en
+`upgrade`. El loader no inyecta el contexto HTTP `events.emit` en definiciones
+WebSocket.
+
+Ver [WEBSOCKETS](./WEBSOCKETS.es.md) para el contrato completo.
+
 ## Archivos de eventos
 
 Con `EventsDomain` configurado:
@@ -156,6 +205,7 @@ Preferir mappings `EVENTS` explícitos para contratos estables.
 - `load()`
 - `setEventsDomain(eventsDomain): this`
 - `getControllers()`
+- `getWebSocketControllers()`
 - `getHooks()`
 - `getSharedModules()`
 - `getLoadedModules()`
@@ -176,7 +226,8 @@ instancia.
   `getHooks()` no se completa con ellos.
 - Models, services y types no se descubren automáticamente; sus getters
   devuelven colecciones vacías o `undefined`.
-- Un directorio `controllers/` o `events/` ausente es válido para `full`.
+- Un directorio `controllers/`, `websockets/` o `events/` ausente es válido para
+  `full`.
 - Un contrato `mws/index.ts` ausente o inválido lanza error y detiene `load()`.
 - `setEventsDomain()` debe llamarse antes de `load()` para registrar archivos
   de eventos. Configurarlo después no vuelve a escanear eventos omitidos.
@@ -190,3 +241,6 @@ instancia.
 
 `getModulesStats()` devuelve totales por tipo, nombres y manifests normalizados
 de módulos cargados. Su registro es global al proceso.
+
+Las estadísticas de controllers WebSocket y conexiones activas usan el registro
+separado, global al proceso, `getWebSocketControllersStats()`.

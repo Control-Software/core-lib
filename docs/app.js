@@ -87,6 +87,16 @@ const docsCatalog = [
 		},
 	},
 	{
+		id: 'WEBSOCKETS',
+		category: 'http',
+		file: 'WEBSOCKETS.md',
+		title: { en: 'Native WebSockets', es: 'WebSockets nativos' },
+		description: {
+			en: 'Typed routes, upgrade authentication, lifecycle, backpressure, pub/sub, modules, and shutdown.',
+			es: 'Rutas tipadas, autenticación de upgrade, lifecycle, backpressure, pub/sub, módulos y shutdown.',
+		},
+	},
+	{
 		id: 'ROUTECONTROLLERS',
 		category: 'http',
 		file: 'ROUTECONTROLLERS.md',

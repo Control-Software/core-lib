@@ -69,6 +69,27 @@ cluster.start('./modules/server.ts', error => {
 El server del worker debe usar `clustering: true` para que Bun habilite
 `reusePort`.
 
+## Comportamiento WebSocket
+
+Con WebSockets nativos, cada conexión aceptada pertenece al worker que realizó
+el upgrade. Son locales al proceso:
+
+- el registro de sockets activos y `pendingWebSockets`;
+- suscripciones y `subscriberCount(topic)`;
+- `ws.publish()` y `server.publish()`;
+- `closeWebSockets()` y los campos WebSocket de `CoreStats`.
+
+`reusePort` distribuye conexiones nuevas entre workers en deployments Linux
+soportados; Bun ignora esa opción en macOS y Windows. No convierte el pub/sub
+nativo en un bus multiproceso.
+
+Para rooms entre workers u hosts, entregar un evento Redis, SQS o
+`EventsDomain` externo a cada worker y llamar su `server.publish()` local. La
+aplicación debe evitar loops y definir orden, retries y garantías de entrega.
+S42-Core no instala ese bridge implícitamente.
+
+Ver [WEBSOCKETS](./WEBSOCKETS.es.md) para el contrato completo.
+
 ## Shutdown y límites actuales
 
 El proceso padre instala handlers one-time para `SIGINT` y `SIGTERM` y mata los
@@ -76,7 +97,7 @@ workers registrados al recibir cualquiera de esas señales.
 
 Límites actuales:
 
-- no hay método público `stop()`;
+- no hay método público `Cluster.stop()`;
 - no reinicia automáticamente un worker que termina;
 - no coordina readiness ni health;
 - no ofrece rolling restart;

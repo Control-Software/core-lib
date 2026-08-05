@@ -2,8 +2,8 @@
 
 ## Purpose
 
-`CoreStats` reports S42-Core controller/module registries and host command
-output.
+`CoreStats` reports S42-Core HTTP controller, WebSocket controller, module, and
+host command state.
 
 ## Automatic route
 
@@ -38,6 +38,7 @@ route to the existing router.
 `CoreStats` does not add authentication or authorization. Its response exposes:
 
 - every registered endpoint;
+- every registered WebSocket path and its active connection count;
 - loaded module names, versions, types, and manifest data;
 - memory and disk output;
 - uptime;
@@ -104,9 +105,16 @@ Repository helpers used by `RouteControllers` (not root package exports):
 		"totalModulesLoaded": 2,
 		"totalModulesFull": 1,
 		"totalModulesShare": 0,
-		"totalModulesMws": 1
+		"totalModulesMws": 1,
+		"totalWebSocketControllers": 1,
+		"activeWebSocketConnections": 2
 	},
 	"endpoints": [{ "method": "GET", "path": "/core/stats" }],
+	"webSockets": {
+		"totalControllers": 1,
+		"activeConnections": 2,
+		"routes": [{ "path": "/ws/chat/:roomId", "activeConnections": 2 }]
+	},
 	"modules": [
 		{ "name": "operators", "version": "1.0.0", "type": "full", "enabled": true }
 	],
@@ -159,6 +167,10 @@ treat the complete payload as operationally sensitive.
 
 ## Registry behavior
 
-Controller and module statistics are process-wide. A controller is tracked when
-constructed; modules are tracked when loaded. In a multi-process cluster, each
-worker reports its own process state.
+HTTP controller, WebSocket controller, active-connection, and module statistics
+are process-wide. A controller is tracked when constructed; WebSocket counts
+change on `open`/`close`; modules are tracked when loaded. In a multi-process
+cluster, each worker reports its own process state.
+
+The WebSocket section deliberately excludes topics, IPs, headers, query values,
+message payloads, and `ws.data`.

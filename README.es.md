@@ -5,8 +5,8 @@
 [English](./README.md) · [Documentación](./DOCUMENTATION/ALL_EN.md) · [Sitio web](https://s42core.com)
 
 S42-Core `3.0.11` es un framework backend TypeScript, Bun-first, para APIs HTTP,
-servicios orientados a módulos, eventos de dominio distribuidos y persistencia
-de uso común.
+WebSockets nativos, servicios orientados a módulos, eventos de dominio
+distribuidos y persistencia de uso común.
 
 Es desarrollado por **Cesar Casas** y **Stock42 LLC** con flujos de ingeniería
 asistidos por AI.
@@ -27,6 +27,8 @@ bun add s42-core
 ## Qué ofrece
 
 - Bootstrap HTTP sobre `Bun.serve`, con mapa de rutas nativas y matcher fallback.
+- WebSockets server tipados y multi-ruta en el mismo listener Bun, con pub/sub,
+  backpressure y compresión nativos, más métricas y shutdown del framework.
 - Descubrimiento de módulos por convención usando `Bun.Glob`.
 - Tres tipos de módulo: `mws`, `share` y `full`.
 - Selección de middleware por controlador.
@@ -53,6 +55,25 @@ await server.start({
 console.info(server.getURL())
 ```
 
+Las rutas WebSocket nativas usan un handler Bun compartido y conservan
+`ws.data` tipado por controller:
+
+```ts
+import { Server, WebSocketController, WebSocketControllers } from 's42-core'
+
+const echo = new WebSocketController({
+	path: '/ws/echo',
+	upgrade: () => ({ data: {} }),
+	message: (ws, message) => ws.send(message),
+})
+
+await new Server().start({
+	port: 5678,
+	idleTimeout: 120,
+	WebSocketControllers: new WebSocketControllers([echo]),
+})
+```
+
 El repositorio incluye un entrypoint de demo para módulos:
 
 ```bash
@@ -72,7 +93,7 @@ este orden:
 1. `mws`: middleware de request bajo demanda desde `mws/index.ts`.
 2. `share`: código y contratos reutilizables; no carga controllers/eventos en
    forma automática.
-3. `full`: controllers y eventos opcionales.
+3. `full`: controllers, controllers WebSocket y eventos, todos opcionales.
 
 Manifest mínimo:
 
@@ -102,6 +123,7 @@ modules/
   operators/
     __module__.ts
     controllers/
+    websockets/
     events/
 ```
 
@@ -114,17 +136,17 @@ para el contrato completo de runtime.
 Solamente los exports de [`src/index.ts`](./src/index.ts) son imports soportados
 del paquete.
 
-| Área          | Exports públicos                                                                        |
-| ------------- | --------------------------------------------------------------------------------------- |
-| HTTP          | `Server`, `RouteControllers`, `Controller`, `Res`, `getControllersStats`                |
-| Módulos       | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats`               |
-| Eventos       | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                                |
-| Datos         | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `SQLError`, `isSQLError`, `Dependencies` |
-| Runtime       | `Cluster`, `SSE`, `CoreStats`                                                           |
-| Logging/tests | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`                            |
+| Área          | Exports públicos                                                                                                              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| HTTP/realtime | `Server`, `RouteControllers`, `Controller`, `Res`, `WebSocketController`, `WebSocketControllers`, estadísticas de controllers |
+| Módulos       | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats`                                                     |
+| Eventos       | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                                                                      |
+| Datos         | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `SQLError`, `isSQLError`, `Dependencies`                                       |
+| Runtime       | `Cluster`, `SSE`, `CoreStats`                                                                                                 |
+| Logging/tests | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`                                                                  |
 
 El paquete también exporta desde su entrypoint los tipos TypeScript de módulos,
-eventos, SQL, logger, SSE, CoreStats y estadísticas.
+eventos, SQL, WebSocket, logger, SSE, CoreStats y estadísticas.
 
 `MongoDBStorage`, `sendEmail` (`src/Mailgun`) y `ViewTemplates` existen dentro
 del repositorio, pero son **utilidades internas**. No están exportadas por el
@@ -142,6 +164,7 @@ Referencias en español:
   [ROUTECONTROLLERS.es](./DOCUMENTATION/ROUTECONTROLLERS.es.md),
   [CONTROLLER.es](./DOCUMENTATION/CONTROLLER.es.md),
   [RESPONSE.es](./DOCUMENTATION/RESPONSE.es.md),
+  [WEBSOCKETS.es](./DOCUMENTATION/WEBSOCKETS.es.md),
   [MODULES.es](./DOCUMENTATION/MODULES.es.md) y
   [CLUSTER.es](./DOCUMENTATION/CLUSTER.es.md)
 - Eventos: [EVENTSDOMAIN.es](./DOCUMENTATION/EVENTSDOMAIN.es.md)
@@ -167,6 +190,9 @@ Referencias en español:
   antes de publicar un servicio.
 - `SSE` necesita el `Request` Web crudo; el request normalizado de los
   controladores no conserva hoy su señal de aborto.
+- La autenticación/autorización WebSocket debe vivir en `upgrade`; los hooks
+  HTTP no se ejecutan en el handshake. Pub/sub y métricas nativas son locales al
+  proceso en cluster.
 - MongoDB, Redis y EventsDomain usan singletons por proceso: la primera
   configuración enviada a `getInstance()` es la que prevalece.
 

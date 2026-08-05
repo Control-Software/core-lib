@@ -110,7 +110,42 @@ await new Server().start({
 habilitados en orden `mws`, `share` y `full`. Leer [Modules](./MODULES.es.md)
 antes de depender de convenciones de middleware o archivos de eventos.
 
-## 4. Hacer un cambio SQL atómico
+## 4. Agregar una ruta WebSocket nativa
+
+```ts
+import { Server, WebSocketController, WebSocketControllers } from 's42-core'
+
+const notifications = new WebSocketController<{ userId: string }>({
+	path: '/ws/notifications',
+	async upgrade({ request }) {
+		const session = await authenticate(request)
+		if (!session) return new Response('Unauthorized', { status: 401 })
+		return { data: { userId: session.userId } }
+	},
+	open(ws) {
+		ws.subscribe(`user:${ws.data.userId}`)
+	},
+})
+
+const server = new Server()
+await server.start({
+	port: 3000,
+	idleTimeout: 120,
+	WebSocketControllers: new WebSocketControllers([notifications], {
+		maxPayloadLength: 1024 * 1024,
+		idleTimeout: 60,
+	}),
+})
+
+server.publish('user:42', 'refresh')
+```
+
+El callback obligatorio `upgrade` es la frontera de autenticación/autorización.
+Los hooks HTTP y `mws` de módulos no se ejecutan en handshakes WebSocket.
+Validar `Origin` en browser, configurar límites de payload/backpressure y usar
+`wss://` en producción. Continuar con [WebSockets](./WEBSOCKETS.es.md).
+
+## 5. Hacer un cambio SQL atómico
 
 ```ts
 import { SQL, isSQLError } from 's42-core'
@@ -155,7 +190,7 @@ idempotencia ni una política de retry. Leer la guía completa de
 [SQL](./SQL.es.md) para filtros, savepoints, transacciones distribuidas,
 ejecución raw, índices, errores y diferencias entre adaptadores.
 
-## 5. Publicar un evento de dominio
+## 6. Publicar un evento de dominio
 
 ```ts
 import { EventsDomain, RedisClient } from 's42-core'
@@ -183,11 +218,13 @@ topología de colas con retry/dead-letter explícitos cuando la entrega sea una
 invariante de negocio. Ver [EventsDomain](./EVENTSDOMAIN.es.md) y
 [Redis](./REDISDB.es.md).
 
-## 6. Checklist de producción
+## 7. Checklist de producción
 
 - Proveer un callback `Server.error` sanitizado.
 - Aplicar la política CORS en una frontera confiable; los headers del router son
   fijos.
+- Autenticar WebSockets en `upgrade`, validar `Origin` del browser y configurar
+  límites de payload, backpressure e inactividad.
 - Llamar métodos `connect()` explícitos durante startup y cerrar clientes en
   shutdown.
 - Validar y limitar paginación en la frontera HTTP.
