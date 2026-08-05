@@ -53,14 +53,18 @@ type TypeSQLConnection = {
 	idleTimeout?: number
 	maxLifetime?: number
 	connection?: Record<string, string | number | boolean>
+	driverOptions?: Omit<Bun.SQL.PostgresOrMySQLOptions, 'adapter' | 'url'>
 }
 ```
 
 Comportamiento de conexión:
 
-- PostgreSQL/MySQL con `url`: Bun detecta el adaptador desde la URI de conexión.
+- `type` siempre selecciona el adaptador nativo usado por S42-Core. Una URI de
+  conexión no puede cambiarlo a otro motor.
+- PostgreSQL/MySQL con `url`: la URI aporta los valores de conexión mientras
+  `type` sigue siendo autoritativo.
 - PostgreSQL/MySQL sin `url`: los defaults de conexión se delegan a `Bun.SQL` y
-  su resolución de variables de entorno.
+  su resolución de variables de entorno para el adaptador seleccionado.
 - SQLite: `url` es el nombre del archivo y por default es `db.sqlite`; usar
   `:memory:` para una base en memoria. El wrapper habilita WAL antes de su
   primera query.
@@ -99,6 +103,51 @@ genérico con `Promise.race`, porque devolvería el control mientras la query si
 ocupando su conexión. Tampoco reintenta operaciones SQL automáticamente; los
 retries deben envolver operaciones o transacciones completas, explícitamente
 idempotentes, en el límite de la aplicación.
+
+### Opciones nativas del driver y credenciales rotativas
+
+`driverOptions` es una vía de escape avanzada para PostgreSQL/MySQL hacia
+[`SQL.PostgresOrMySQLOptions`](https://bun.com/reference/bun/SQL/PostgresOrMySQLOptions),
+la configuración nativa de Bun. S42-Core la combina superficialmente después de
+las opciones de conexión superiores: un valor en `driverOptions` gana y los
+objetos anidados, como `tls`, se reemplazan en lugar de combinarse en profundidad.
+
+```ts
+const sql = new SQL({
+	type: 'postgres',
+	driverOptions: {
+		hostname,
+		port,
+		username,
+		database,
+		password: () => getToken({ host: hostname, port, username }),
+		tls: {
+			ca,
+			serverName: hostname,
+			rejectUnauthorized: true,
+		},
+	},
+})
+```
+
+Bun resuelve una función `password` síncrona o asíncrona al establecer una
+conexión. Esto soporta tokens de autenticación de corta duración y passwords
+rotativos sin colocar el secreto en una URI. Mantener alineados el hostname de
+firma y el `serverName` TLS con el endpoint real de la base, y no registrar la
+credencial retornada. El callback no es un timer de 15 minutos: se evalúa por
+cada nueva conexión que abre el pool y no reautentica una sesión ya establecida.
+Configurar `maxLifetime` cuando la política de credenciales también exija
+reciclar conexiones existentes del pool.
+
+S42-Core controla `adapter` y `url`: están excluidos del tipo público de
+`driverOptions` y se rechazan en runtime si llegan desde JavaScript sin tipos o
+mediante un cast. `config.type` fija el adaptador y el `url` superior sigue siendo
+la única fuente de URI. `driverOptions` se rechaza para SQLite y su campo
+`connection` continúa siendo exclusivo de PostgreSQL.
+
+El callback de password supone un usuario de base estable. Los proveedores que
+rotan tanto username como password requieren una nueva instancia de `SQL` y un
+drenado controlado del pool anterior.
 
 ## Ciclo de vida de la conexión
 
@@ -277,21 +326,37 @@ transaccional también varía por motor.
 ### `addTableColumns(tableName, changes)`
 
 ```ts
-addTableColumns(tableName: string, changes: ColumnDefinition): Promise<boolean>
+type AddTableColumnsChanges = {
+	$checkIfExists?: boolean
+	[columnName: string]: string | boolean | undefined
+}
+
+addTableColumns(tableName: string, changes: AddTableColumnsChanges): Promise<boolean>
 ```
 
 Crea una alteración `ADD COLUMN <name> <definition>` por entrada y delega en
-`alterTable()`.
+`alterTable()`. Con `$checkIfExists: true`, PostgreSQL emite en cambio
+`ADD COLUMN IF NOT EXISTS` para cada columna:
 
 ```ts
 await sql.addTableColumns('products', {
+	$checkIfExists: true,
 	enabled: 'BOOLEAN DEFAULT TRUE',
 	updated_at: 'TIMESTAMP',
 })
 ```
 
-Los nombres de columna se validan. Las definiciones son fragmentos DDL raw
-confiables.
+La opción está ausente/vale `false` por defecto, por lo que conserva
+`ADD COLUMN` simple en todos los adaptadores. MySQL y SQLite rechazan
+`$checkIfExists: true` antes de ejecutar una query porque sus gramáticas nativas
+soportadas no ofrecen esa cláusula; S42-Core no la emula con un pre-check de
+schema no atómico. El wrapper directo `SQLite` aplica el mismo rechazo.
+
+Los nombres de columna se validan. Las definiciones son fragmentos DDL raw,
+confiables y no vacíos. Las cláusulas se ejecutan secuencialmente, por lo que una
+columna PostgreSQL existente puede omitirse y las siguientes todavía agregarse.
+`IF NOT EXISTS` sólo verifica el nombre: no comprueba que una definición
+existente coincida con el DDL recibido.
 
 ### `dropColumn(tableName, columnName)`
 

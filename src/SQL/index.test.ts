@@ -477,6 +477,72 @@ describe('SQL — pool and timeout configuration', () => {
 		expect(options.maxLifetime).toBe(180000)
 	})
 
+	test('forwards native driver options and lets them override top-level values', () => {
+		const password = async () => 'short-lived-token'
+		const db = new SQL({
+			type: 'postgres',
+			tls: { rejectUnauthorized: false },
+			max: 3,
+			driverOptions: {
+				hostname: 'database.example.com',
+				port: 5432,
+				username: 'service_user',
+				database: 'service_database',
+				password,
+				max: 11,
+				tls: {
+					ca: 'trusted-ca',
+					serverName: 'database.example.com',
+					rejectUnauthorized: true,
+				},
+			},
+		})
+		const options = getNativeOptions(db)
+		const tls = options.tls as Bun.TLSOptions
+
+		expect(options.adapter).toBe('postgres')
+		expect(options.hostname).toBe('database.example.com')
+		expect(options.port).toBe(5432)
+		expect(options.username).toBe('service_user')
+		expect(options.database).toBe('service_database')
+		expect(options.password).toBe(password)
+		expect(options.max).toBe(11)
+		expect(tls.serverName).toBe('database.example.com')
+		expect(tls.rejectUnauthorized).toBe(true)
+	})
+
+	test('keeps config.type authoritative without a URL and over a conflicting URL scheme', () => {
+		const mysql = new SQL({
+			type: 'mysql',
+			driverOptions: {
+				hostname: 'mysql.example.com',
+				port: 3306,
+			},
+		})
+		const postgres = new SQL({
+			type: 'postgres',
+			url: 'mysql://user:pass@localhost:3306/database',
+		})
+
+		expect(getNativeOptions(mysql).adapter).toBe('mysql')
+		expect(getNativeOptions(postgres).adapter).toBe('postgres')
+	})
+
+	test('rejects framework-owned native driver options', () => {
+		const driverOptions: Bun.SQL.PostgresOrMySQLOptions = {
+			adapter: 'mysql',
+			url: 'mysql://user:pass@localhost:3306/database',
+		}
+
+		expect(
+			() =>
+				new SQL({
+					type: 'postgres',
+					driverOptions,
+				}),
+		).toThrow('framework-owned options: adapter, url')
+	})
+
 	test('rejects pool and session options for SQLite', () => {
 		expect(
 			() =>
@@ -489,6 +555,17 @@ describe('SQL — pool and timeout configuration', () => {
 		).toThrow('SQLite does not support SQL pool/session options: max, connectionTimeout')
 	})
 
+	test('rejects native driver options for SQLite', () => {
+		expect(
+			() =>
+				new SQL({
+					type: 'sqlite',
+					url: ':memory:',
+					driverOptions: { max: 2 },
+				}),
+		).toThrow('SQLite does not support SQL driverOptions')
+	})
+
 	test('rejects PostgreSQL runtime parameters for MySQL', () => {
 		expect(
 			() =>
@@ -498,6 +575,75 @@ describe('SQL — pool and timeout configuration', () => {
 					connection: { statement_timeout: 5000 },
 				}),
 		).toThrow('only supported for PostgreSQL')
+		expect(
+			() =>
+				new SQL({
+					type: 'mysql',
+					driverOptions: { connection: { statement_timeout: 5000 } },
+				}),
+		).toThrow('only supported for PostgreSQL')
+	})
+})
+
+describe('SQL — addTableColumns', () => {
+	test('adds PostgreSQL columns idempotently when $checkIfExists is true', async () => {
+		const recorder = makeDialectQueryRecorder('postgres')
+
+		await recorder.db.addTableColumns('products', {
+			$checkIfExists: true,
+			sku: 'varchar(80)',
+			rank: 'integer',
+		})
+
+		expect(recorder.queries).toEqual([
+			'ALTER TABLE products ADD COLUMN IF NOT EXISTS sku VARCHAR(80)',
+			'ALTER TABLE products ADD COLUMN IF NOT EXISTS rank INTEGER',
+		])
+	})
+
+	test('preserves plain ADD COLUMN when $checkIfExists is absent or false', async () => {
+		const withoutFlag = makeDialectQueryRecorder('mysql')
+		const falseFlag = makeDialectQueryRecorder('sqlite')
+
+		await withoutFlag.db.addTableColumns('products', { sku: 'varchar(80)' })
+		await falseFlag.db.addTableColumns('products', {
+			$checkIfExists: false,
+			rank: 'integer',
+		})
+
+		expect(withoutFlag.queries).toEqual([
+			'ALTER TABLE products ADD COLUMN sku VARCHAR(80)',
+		])
+		expect(falseFlag.queries).toEqual(['ALTER TABLE products ADD COLUMN rank INTEGER'])
+	})
+
+	test('rejects $checkIfExists on engines without native syntax support', async () => {
+		for (const dialect of ['mysql', 'sqlite'] as const) {
+			const recorder = makeDialectQueryRecorder(dialect)
+			await expect(
+				recorder.db.addTableColumns('products', {
+					$checkIfExists: true,
+					sku: 'varchar(80)',
+				}),
+			).rejects.toThrow('only supported for PostgreSQL')
+		}
+	})
+
+	test('validates the reserved option and remaining column definitions', async () => {
+		const recorder = makeDialectQueryRecorder('postgres')
+
+		await expect(
+			recorder.db.addTableColumns('products', {
+				$checkIfExists: 'yes',
+				sku: 'varchar(80)',
+			} as unknown as Parameters<SQL['addTableColumns']>[1]),
+		).rejects.toThrow('$checkIfExists must be a boolean')
+		await expect(
+			recorder.db.addTableColumns('products', { $checkIfExists: true }),
+		).rejects.toThrow('requires at least one column')
+		await expect(
+			recorder.db.addTableColumns('products', { enabled: true }),
+		).rejects.toThrow('must be a non-empty string')
 	})
 })
 

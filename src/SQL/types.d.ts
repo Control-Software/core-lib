@@ -23,6 +23,12 @@ export type ColumnDefinition = {
 	[columnName: string]: string
 }
 
+export type AddTableColumnsChanges = {
+	/** PostgreSQL-only: emit ADD COLUMN IF NOT EXISTS for every column. */
+	$checkIfExists?: boolean
+	[columnName: string]: string | boolean | undefined
+}
+
 export type SQLIndexColumn =
 	| string
 	| {
@@ -110,4 +116,10 @@ export type TypeSQLConnection = {
 	maxLifetime?: number
 	/** PostgreSQL-only client runtime parameters, such as `statement_timeout`. */
 	connection?: Record<string, string | number | boolean>
+	/**
+	 * Advanced PostgreSQL/MySQL options forwarded to Bun.SQL after the top-level
+	 * options. The merge is shallow, so values here take precedence. `adapter`
+	 * and `url` remain controlled by S42-Core.
+	 */
+	driverOptions?: Omit<Bun.SQL.PostgresOrMySQLOptions, 'adapter' | 'url'>
 }

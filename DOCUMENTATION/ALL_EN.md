@@ -793,8 +793,9 @@ const sql = new SQL({
 
 For SQLite, `url` is a filename and defaults to `db.sqlite`; `:memory:` creates
 an in-memory database and WAL is enabled before the first query. For PostgreSQL
-or MySQL, omitting `url` delegates connection defaults to `Bun.SQL`. `tls` is
-passed only to PostgreSQL/MySQL.
+or MySQL, omitting `url` delegates connection defaults to `Bun.SQL`. `type`
+always remains authoritative for the adapter, including when a URI is supplied.
+`tls` is passed only to PostgreSQL/MySQL.
 
 PostgreSQL/MySQL pool configuration uses Bun's native, seconds-based options:
 `max` limits pool connections, `connectionTimeout` bounds connection
@@ -804,6 +805,36 @@ establishment, `idleTimeout` configures Bun's native pool idle timeout, and
 sent to every new connection, including `statement_timeout`, `lock_timeout`, and
 `application_name`. `connection` is rejected for MySQL; all five options are
 rejected for SQLite instead of being ignored.
+
+Advanced PostgreSQL/MySQL configuration is available through
+`driverOptions?: Omit<Bun.SQL.PostgresOrMySQLOptions, 'adapter' | 'url'>`.
+S42-Core shallowly merges these native options after the top-level fields, so
+they win and nested objects are replaced rather than deep-merged. The framework
+still owns `adapter` and `url`, rejects them at runtime if supplied through a
+cast, and rejects all `driverOptions` for SQLite.
+
+```ts
+const sql = new SQL({
+	type: 'postgres',
+	driverOptions: {
+		hostname,
+		port,
+		username,
+		database,
+		password: () => getToken({ host: hostname, port, username }),
+		tls: { ca, serverName: hostname, rejectUnauthorized: true },
+	},
+})
+```
+
+Bun resolves a synchronous or asynchronous `password` function when it opens a
+connection. This supports short-lived IAM/Vault-style credentials without
+placing the secret in a URI. Do not log the returned credential. The callback
+is evaluated per newly opened pool connection; it is not a timer and does not
+re-authenticate an established session. Use `maxLifetime` when policy requires
+pooled sessions to be recycled. The callback assumes a stable username;
+rotating the username requires a new `SQL` instance and a controlled drain of
+the old pool.
 
 These pool options do not bound a running query. Use PostgreSQL
 `connection.statement_timeout` or database/role configuration when the server
@@ -864,7 +895,7 @@ Schema API:
 | ------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | `createTable(tableName, schema)`                 | `CREATE TABLE IF NOT EXISTS`; returns `true`. Schema definitions are trusted raw DDL.   |
 | `alterTable(tableName, alterationOrArray)`       | Executes one `ALTER TABLE` per trusted raw clause, sequentially; returns `true`.        |
-| `addTableColumns(tableName, changes)`            | Builds one `ADD COLUMN` clause per entry and delegates to `alterTable`.                 |
+| `addTableColumns(tableName, changes)`            | Sequential columns; PostgreSQL can opt into `IF NOT EXISTS` with `$checkIfExists`.      |
 | `dropColumn(tableName, columnName)`              | Validated identifiers; delegates `DROP COLUMN` to the configured engine.                |
 | `createIndex(tableName, columns, options?)`      | Single/compound, ordered, unique, partial, named, and engine-specific advanced indexes. |
 | `dropIndex(tableName, indexName, options?)`      | Removes a standalone index with validated identifiers and adapter-specific syntax.      |
@@ -872,6 +903,21 @@ Schema API:
 | `getAllTables()`                                 | Lists tables through the adapter and normalizes the common shape.                       |
 | `getTableSchema(tableName)`                      | Normalized column metadata; not complete constraint/index introspection.                |
 | `validateTableSchema(tableName, expectedSchema)` | Checks column-name presence only; does not compare types, defaults, keys, or indexes.   |
+
+```ts
+await sql.addTableColumns('products', {
+	$checkIfExists: true,
+	sku: 'VARCHAR(80)',
+	updated_at: 'TIMESTAMP',
+})
+```
+
+`$checkIfExists` is absent/`false` by default. `true` emits PostgreSQL
+`ADD COLUMN IF NOT EXISTS` for every entry. MySQL, multi-engine SQLite, and the
+direct `SQLite` wrapper reject `true` before execution because they do not
+support the clause natively; S42-Core does not substitute a non-atomic schema
+pre-check. An existing PostgreSQL column is matched only by name, not by whether
+its definition equals the supplied DDL.
 
 `createIndex` accepts the backwards-compatible single-column form and an
 advanced form:

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **SQL native driver options and rotating credentials:** `TypeSQLConnection`
+  now accepts PostgreSQL/MySQL `driverOptions`, shallow-merged after the
+  top-level fields. This exposes Bun-native host configuration, TLS/SNI, and
+  synchronous or asynchronous password providers for short-lived IAM/Vault-style
+  credentials. S42-Core keeps `type` authoritative, owns `adapter`/`url`, and
+  rejects the option for SQLite.
+- **PostgreSQL idempotent column additions:** `addTableColumns()` accepts the
+  reserved `$checkIfExists` boolean. `true` emits `ADD COLUMN IF NOT EXISTS` for
+  every PostgreSQL column; MySQL and both SQLite surfaces reject it before query
+  execution because their supported native grammars do not provide the clause.
+  Omitted/`false` preserves the existing plain `ADD COLUMN` behavior.
+
 ## [3.0.11] - 2026-08-03
 
 ### Added

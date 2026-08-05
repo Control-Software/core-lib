@@ -56,6 +56,7 @@ export {
 	type ControllerType,
 } from './Modules'
 export type {
+	AddTableColumnsChanges,
 	tableRowSchema,
 	tableInternalSchema,
 	ColumnDefinition,

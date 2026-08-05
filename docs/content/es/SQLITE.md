@@ -96,6 +96,12 @@ clase directa `SQLite` no expone `SQL.executeRaw()`; usar la clase multi-motor
 Los strings de tipos del schema son fragmentos DDL confiables y no deben
 provenir de input de requests.
 
+`addTableColumns()` acepta la propiedad reservada compartida
+`$checkIfExists?: boolean`. Omitirla o usar `false` conserva los statements
+`ADD COLUMN` simples de SQLite. `true` lanza antes de ejecutar porque SQLite no
+soporta `ADD COLUMN IF NOT EXISTS`; el wrapper no emula la cláusula con un
+pre-check de schema no atómico.
+
 Los identificadores se validan pero no se quotean. Nombres válidos para el
 allow-list todavía pueden coincidir con palabras reservadas del motor. Los
 fragmentos de tipo se convierten completos a uppercase, incluso texto dentro de
@@ -136,9 +142,9 @@ const rows = await db.select<{ uuid: string; email: string }>(
 - `limit` y `offset` se renderizan solamente cuando son truthy y se interpolan
   como números; `0` se omite y valores negativos no se rechazan. Validar enteros
   finitos no negativos en la frontera HTTP.
-- `addTableColumns()` ejecuta un `ALTER TABLE` por columna sin transacción ni
-  `IF NOT EXISTS`; una falla posterior puede dejar cambios anteriores aplicados
-  y startups de schema concurrentes pueden competir.
+- `addTableColumns()` ejecuta un `ALTER TABLE` por columna sin transacción. Una
+  falla posterior puede dejar cambios anteriores aplicados y startups de schema
+  concurrentes pueden competir. `$checkIfExists: true` se rechaza explícitamente.
 - El wrapper no habilita WAL ni `PRAGMA foreign_keys`; configurar los pragmas
   SQLite necesarios fuera de esta abstracción. Usar `SQL` multi-engine cuando
   su inicialización WAL, transacciones o API raw sean más adecuadas.

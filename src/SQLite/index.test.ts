@@ -91,3 +91,38 @@ describe('SQLite — normalized driver errors', () => {
 		}
 	})
 })
+
+describe('SQLite — addTableColumns existence option', () => {
+	test('preserves plain ADD COLUMN when $checkIfExists is false', async () => {
+		const db = new SQLite({ type: 'memory' })
+
+		try {
+			db.createTable('products', { id: 'INTEGER PRIMARY KEY' })
+			await db.addTableColumns('products', {
+				$checkIfExists: false,
+				sku: 'TEXT',
+			})
+
+			const schema = await db.getTableSchema('products')
+			expect(schema.some(column => column.name === 'sku')).toBe(true)
+		} finally {
+			db.close()
+		}
+	})
+
+	test('rejects $checkIfExists because SQLite has no native syntax', async () => {
+		const db = new SQLite({ type: 'memory' })
+
+		try {
+			db.createTable('products', { id: 'INTEGER PRIMARY KEY' })
+			await expect(
+				db.addTableColumns('products', {
+					$checkIfExists: true,
+					sku: 'TEXT',
+				}),
+			).rejects.toThrow('only supported for PostgreSQL')
+		} finally {
+			db.close()
+		}
+	})
+})

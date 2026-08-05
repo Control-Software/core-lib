@@ -1,6 +1,7 @@
 import { SQL as BunSQL, type TransactionSQL as BunTransactionSQL } from 'bun'
 import { logger } from '../Logger'
 import type {
+	AddTableColumnsChanges,
 	ColumnDefinition,
 	CreateIndexOptions,
 	DropIndexOptions,
@@ -45,6 +46,8 @@ const SQLITE_UNSUPPORTED_CONNECTION_OPTIONS = [
 	'connection',
 ] as const
 
+const FRAMEWORK_OWNED_DRIVER_OPTIONS = ['adapter', 'url'] as const
+
 export class SQL {
 	private dbInstance: BunSQL
 	private dbType: 'mysql' | 'postgres' | 'sqlite'
@@ -54,6 +57,10 @@ export class SQL {
 	constructor(config: TypeSQLConnection) {
 		this.dbType = config.type
 		if (this.dbType === 'sqlite') {
+			if (config.driverOptions !== undefined) {
+				throw new Error('SQLite does not support SQL driverOptions')
+			}
+
 			const unsupportedOptions = SQLITE_UNSUPPORTED_CONNECTION_OPTIONS.filter(
 				option => config[option] !== undefined,
 			)
@@ -69,7 +76,23 @@ export class SQL {
 				filename: config.url || 'db.sqlite',
 			})
 		} else {
-			if (this.dbType !== 'postgres' && config.connection !== undefined) {
+			const driverOptions = config.driverOptions as
+				| Bun.SQL.PostgresOrMySQLOptions
+				| undefined
+			const frameworkOwnedOptions = FRAMEWORK_OWNED_DRIVER_OPTIONS.filter(
+				option => driverOptions?.[option] !== undefined,
+			)
+
+			if (frameworkOwnedOptions.length > 0) {
+				throw new Error(
+					`SQL driverOptions cannot override framework-owned options: ${frameworkOwnedOptions.join(', ')}`,
+				)
+			}
+
+			if (
+				this.dbType !== 'postgres' &&
+				(config.connection !== undefined || driverOptions?.connection !== undefined)
+			) {
 				throw new Error(
 					'The SQL connection option "connection" is only supported for PostgreSQL',
 				)
@@ -77,7 +100,7 @@ export class SQL {
 
 			const connectionOptions: Bun.SQL.PostgresOrMySQLOptions = {}
 
-			if (config.tls) {
+			if (config.tls !== undefined) {
 				connectionOptions.tls = config.tls
 			}
 			if (config.max !== undefined) {
@@ -95,14 +118,16 @@ export class SQL {
 			if (config.connection !== undefined) {
 				connectionOptions.connection = config.connection
 			}
+			if (driverOptions !== undefined) {
+				Object.assign(connectionOptions, driverOptions)
+			}
+
+			connectionOptions.adapter = this.dbType
 
 			if (config.url) {
 				this.dbInstance = new BunSQL(config.url, connectionOptions)
-			} else if (Object.keys(connectionOptions).length > 0) {
-				this.dbInstance = new BunSQL(connectionOptions)
 			} else {
-				// Fallback to default env vars if no URL provided, or empty constructor
-				this.dbInstance = new BunSQL()
+				this.dbInstance = new BunSQL(connectionOptions)
 			}
 		}
 	}
@@ -631,13 +656,33 @@ export class SQL {
 
 	public async addTableColumns(
 		tableName: string,
-		changes: ColumnDefinition,
+		changes: AddTableColumnsChanges,
 	): Promise<boolean> {
 		assertValidIdentifier(tableName, 'table name')
-		Object.keys(changes).forEach(column => assertValidIdentifier(column, 'column'))
+		const { $checkIfExists, ...columns } = changes
+		if ($checkIfExists !== undefined && typeof $checkIfExists !== 'boolean') {
+			throw new Error('addTableColumns $checkIfExists must be a boolean')
+		}
+		if ($checkIfExists && this.dbType !== 'postgres') {
+			throw new Error('ADD COLUMN IF NOT EXISTS is only supported for PostgreSQL')
+		}
+
+		const rawColumnEntries = Object.entries(columns)
+		if (rawColumnEntries.length === 0) {
+			throw new Error('addTableColumns requires at least one column')
+		}
+		const columnEntries = rawColumnEntries.map(([column, type]) => {
+			assertValidIdentifier(column, 'column')
+			if (typeof type !== 'string' || type.trim().length === 0) {
+				throw new Error(`Column definition for "${column}" must be a non-empty string`)
+			}
+			return [column, type] as const
+		})
+
 		try {
-			const alterClauses = Object.entries(changes).map(
-				([column, type]) => `ADD COLUMN ${column} ${type.toUpperCase()}`,
+			const ifNotExists = $checkIfExists ? ' IF NOT EXISTS' : ''
+			const alterClauses = columnEntries.map(
+				([column, type]) => `ADD COLUMN${ifNotExists} ${column} ${type.toUpperCase()}`,
 			)
 			return await this.alterTable(tableName, alterClauses)
 		} catch (err) {

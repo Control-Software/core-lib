@@ -6,6 +6,7 @@ import {
 	translateMongoJsonToSql,
 } from '../SQL/identifiers'
 import { normalizeSQLError } from '../SQL/errors'
+import type { AddTableColumnsChanges } from '../SQL/types.d'
 import { logger } from '../Logger'
 
 export { translateMongoJsonToSql }
@@ -110,12 +111,30 @@ export class SQLite {
 
 	public async addTableColumns(
 		tableName: string,
-		changes: ColumnDefinition,
+		changes: AddTableColumnsChanges,
 	): Promise<Changes[]> {
 		this.tableMatch(tableName)
-		Object.keys(changes).forEach(column => assertValidIdentifier(column, 'column'))
+		const { $checkIfExists, ...columns } = changes
+		if ($checkIfExists !== undefined && typeof $checkIfExists !== 'boolean') {
+			throw new Error('addTableColumns $checkIfExists must be a boolean')
+		}
+		if ($checkIfExists) {
+			throw new Error('ADD COLUMN IF NOT EXISTS is only supported for PostgreSQL')
+		}
+
+		const rawColumnEntries = Object.entries(columns)
+		if (rawColumnEntries.length === 0) {
+			throw new Error('addTableColumns requires at least one column')
+		}
+		const columnEntries = rawColumnEntries.map(([column, type]) => {
+			assertValidIdentifier(column, 'column')
+			if (typeof type !== 'string' || type.trim().length === 0) {
+				throw new Error(`Column definition for "${column}" must be a non-empty string`)
+			}
+			return [column, type] as const
+		})
 		try {
-			const alterClauses = Object.entries(changes).map(
+			const alterClauses = columnEntries.map(
 				([column, type]) => `ADD COLUMN ${column} ${type.toUpperCase()}`,
 			)
 
