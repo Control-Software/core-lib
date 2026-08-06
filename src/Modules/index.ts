@@ -9,16 +9,37 @@ import {
 	type WebSocketControllerOptions,
 	type WebSocketData,
 } from '../WebSocketController'
+import {
+	getStaticModulePathError,
+	StaticRoutesRegistry,
+	type StaticRoutes,
+} from '../StaticRoutes'
 
 // 🤖🧩📡⚙️🔎⭕️
-export const Module = z.object({
+const ModuleBase = z.object({
 	name: z.string(),
 	version: z.string(),
-	type: z.enum(['mws', 'full', 'share']).default('full'),
 	enabled: z.boolean().default(true),
 	initialize: z.function().optional(),
 	dependencies: z.array(z.record(z.string(), z.any())).optional(),
 })
+
+const StandardModule = ModuleBase.extend({
+	type: z.enum(['mws', 'full', 'share']).default('full'),
+	path: z.never().optional(),
+})
+
+const StaticModule = ModuleBase.extend({
+	type: z.literal('static'),
+	path: z.string().superRefine((path, context) => {
+		const error = getStaticModulePathError(path)
+		if (error) {
+			context.addIssue({ code: 'custom', message: error })
+		}
+	}),
+})
+
+export const Module = z.union([StandardModule, StaticModule])
 
 export const Model = z.object({
 	name: z.string(),
@@ -74,12 +95,15 @@ export type ServiceType = z.infer<typeof Service>
 export type ControllerType = z.infer<typeof Controllers>[number]
 export type TypesType = z.infer<typeof Types>
 export type ModuleType = z.infer<typeof Module>
+export type StaticModuleType = z.infer<typeof StaticModule>
+export type StaticModuleDefinition = z.input<typeof StaticModule>
 
 export type ModulesStats = {
 	totalModulesLoaded: number
 	totalModulesFull: number
 	totalModulesShare: number
 	totalModulesMws: number
+	totalModulesStatic: number
 	modulesNames: string[]
 	modules: ModuleType[]
 }
@@ -104,6 +128,7 @@ export function getModulesStats(): ModulesStats {
 		totalModulesFull: modules.filter(module => module.type === 'full').length,
 		totalModulesShare: modules.filter(module => module.type === 'share').length,
 		totalModulesMws: modules.filter(module => module.type === 'mws').length,
+		totalModulesStatic: modules.filter(module => module.type === 'static').length,
 		modulesNames: modules.map(module => module.name),
 		modules,
 	}
@@ -139,6 +164,8 @@ export class Modules {
 	private readonly middlewareModules = new Map<string, TypeRegisteredMiddleware>()
 	private readonly fullModules: ModuleType[] = []
 	private readonly sharedModules: ModuleType[] = []
+	private readonly staticModules: ModuleType[] = []
+	private readonly staticRoutes = new StaticRoutesRegistry()
 	private readonly services: ServiceType[] = []
 	private readonly models: ModelType[] = []
 	private readonly types: TypesType = undefined
@@ -163,6 +190,10 @@ export class Modules {
 		const fullModules = discoveredModules.filter(
 			discovered => discovered.module.type === 'full',
 		)
+		const staticModules = discoveredModules.filter(
+			(discovered): discovered is TypeDiscoveredModule & { module: StaticModuleType } =>
+				discovered.module.type === 'static',
+		)
 
 		for (const discovered of middlewareModules) {
 			await this.loadMiddleware(discovered.module, discovered.moduleFilePath)
@@ -178,6 +209,11 @@ export class Modules {
 			await this.loadControllers(discovered.module, discovered.moduleFilePath)
 			await this.loadWebSocketControllers(discovered.module, discovered.moduleFilePath)
 			await this.loadEvents(discovered.module, discovered.moduleFilePath)
+			await this.initializeModule(discovered.module)
+		}
+
+		for (const discovered of staticModules) {
+			await this.loadStatic(discovered.module, discovered.moduleFilePath)
 			await this.initializeModule(discovered.module)
 		}
 	}
@@ -203,6 +239,33 @@ export class Modules {
 			if (await this.directoryExists(fullDirPath)) {
 				logger.warn(
 					`⭕️ Share module ${module.name}@${module.version} ignores "${dirName}" directory (${fullDirPath}).`,
+				)
+			}
+		}
+	}
+
+	private async loadStatic(
+		module: StaticModuleType,
+		moduleFilePath: string,
+	): Promise<void> {
+		const moduleDir = this.dirname(moduleFilePath)
+		const publicDirectory = this.joinPath(moduleDir, 'public')
+
+		await this.staticRoutes.addModule({
+			name: module.name,
+			version: module.version,
+			path: module.path,
+			publicDirectory,
+		})
+
+		registerModuleStats(module)
+		this.trackModule(this.staticModules, module)
+
+		for (const dirName of ['controllers', 'events', 'mws', 'websockets']) {
+			const fullDirPath = this.joinPath(moduleDir, dirName)
+			if (await this.directoryExists(fullDirPath)) {
+				logger.warn(
+					`⭕️ Static module ${module.name}@${module.version} ignores "${dirName}" directory (${fullDirPath}).`,
 				)
 			}
 		}
@@ -810,6 +873,10 @@ export class Modules {
 		return this.webSocketControllers
 	}
 
+	getStaticRoutes(): StaticRoutes {
+		return this.staticRoutes
+	}
+
 	getHooks(): TypeHook[] {
 		return this.hooks
 	}
@@ -823,6 +890,7 @@ export class Modules {
 			...Array.from(this.middlewareModules.values()).map(middleware => middleware.module),
 			...this.sharedModules,
 			...this.fullModules,
+			...this.staticModules,
 		]
 	}
 

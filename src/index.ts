@@ -63,6 +63,14 @@ export {
 	type WebSocketUpgradeResult,
 } from './WebSocketController'
 export { WebSocketControllers, type WebSocketServerOptions } from './WebSocketControllers'
+export {
+	getStaticRoutesStats,
+	type StaticRouteKind,
+	type StaticRouteMetadata,
+	type StaticRoutes,
+	type StaticRoutesMap,
+	type StaticRoutesStats,
+} from './StaticRoutes'
 export { SSE, type TypeSSEventToSend } from './SSE'
 export * as Test from './Test'
 export { SQLite } from './SQLite'
@@ -78,6 +86,7 @@ export {
 	type ModelType,
 	type ModulesStats,
 	type ServiceType,
+	type StaticModuleDefinition,
 	type ControllerType,
 } from './Modules'
 export type {

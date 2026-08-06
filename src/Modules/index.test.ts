@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { clearControllersStats } from '../Controller'
 import { setLogSink, type LogSink } from '../Logger'
+import { clearStaticRoutesStats, getStaticRoutesStats } from '../StaticRoutes'
 import { clearWebSocketControllersStats } from '../WebSocketController'
-import { clearModulesStats, getModulesStats, Modules } from './index'
+import { clearModulesStats, getModulesStats, Module, Modules } from './index'
 
 const defaultLogSink: LogSink = {
 	debug: (...args) => console.log(...args),
@@ -20,6 +21,7 @@ describe('getModulesStats', () => {
 	beforeEach(async () => {
 		clearControllersStats()
 		clearWebSocketControllersStats()
+		clearStaticRoutesStats()
 		clearModulesStats()
 		fixtureDir = await mkdtemp(join(tmpdir(), 's42-core-modules-'))
 
@@ -27,6 +29,7 @@ describe('getModulesStats', () => {
 		await mkdir(join(fixtureDir, 'share'), { recursive: true })
 		await mkdir(join(fixtureDir, 'operators', 'controllers'), { recursive: true })
 		await mkdir(join(fixtureDir, 'operators', 'websockets'), { recursive: true })
+		await mkdir(join(fixtureDir, 'website', 'public'), { recursive: true })
 
 		await writeFile(
 			join(fixtureDir, 'auth', '__module__.ts'),
@@ -52,6 +55,14 @@ describe('getModulesStats', () => {
 			join(fixtureDir, 'operators', 'websockets', 'stream.ts'),
 			`export default { name: 'operators.stream', version: '1.0.0', path: '/ws/operators/:operatorId', upgrade: ({ params }) => ({ data: { operatorId: params.operatorId } }), message: (ws, message) => ws.send(message) }\n`,
 		)
+		await writeFile(
+			join(fixtureDir, 'website', '__module__.ts'),
+			`export default { name: 'website', version: '1.0.0', type: 'static', path: '/site' }\n`,
+		)
+		await writeFile(
+			join(fixtureDir, 'website', 'public', 'index.html'),
+			'<h1>Website</h1>',
+		)
 	})
 
 	afterEach(async () => {
@@ -66,15 +77,39 @@ describe('getModulesStats', () => {
 
 		const stats = getModulesStats()
 
-		expect(stats.totalModulesLoaded).toBe(3)
+		expect(stats.totalModulesLoaded).toBe(4)
 		expect(stats.totalModulesMws).toBe(1)
 		expect(stats.totalModulesShare).toBe(1)
 		expect(stats.totalModulesFull).toBe(1)
-		expect([...stats.modulesNames].sort()).toEqual(['auth', 'operators', 'share'])
+		expect(stats.totalModulesStatic).toBe(1)
+		expect([...stats.modulesNames].sort()).toEqual([
+			'auth',
+			'operators',
+			'share',
+			'website',
+		])
 		expect(stats.modules.map(module => module.name).sort()).toEqual([
 			'auth',
 			'operators',
 			'share',
+			'website',
+		])
+		expect(getStaticRoutesStats()).toEqual({
+			totalModules: 1,
+			totalFiles: 1,
+			totalRoutes: 3,
+			paths: ['/site'],
+		})
+		expect(Object.keys(modules.getStaticRoutes().getRoutes()).sort()).toEqual([
+			'/site',
+			'/site/',
+			'/site/index.html',
+		])
+		expect(modules.getLoadedModules().map(module => module.type)).toEqual([
+			'mws',
+			'share',
+			'full',
+			'static',
 		])
 	})
 
@@ -94,6 +129,10 @@ describe('getModulesStats', () => {
 			join(fixtureDir, 'operators', '__module__.ts'),
 			`export default { name: 'operators', version: '1.0.0', type: 'full', initialize: () => globalThis.${initializeEventsKey}.push('operators') }\n`,
 		)
+		await writeFile(
+			join(fixtureDir, 'website', '__module__.ts'),
+			`export default { name: 'website', version: '1.0.0', type: 'static', path: '/site', initialize: () => globalThis.${initializeEventsKey}.push('website') }\n`,
+		)
 
 		const modules = new Modules(fixtureDir)
 		await modules.load()
@@ -102,6 +141,7 @@ describe('getModulesStats', () => {
 			'auth',
 			'share',
 			'operators',
+			'website',
 		])
 
 		delete (globalThis as Record<string, unknown>)[initializeEventsKey]
@@ -132,6 +172,58 @@ describe('getModulesStats', () => {
 		await modules.load()
 
 		expect(modules.getWebSocketControllers()).toEqual([])
+	})
+
+	test('validates static module paths and requires public for enabled modules', async () => {
+		expect(
+			Module.safeParse({
+				name: 'missing-path',
+				version: '1.0.0',
+				type: 'static',
+			}).success,
+		).toBe(false)
+		expect(
+			Module.safeParse({
+				name: 'invalid-path',
+				version: '1.0.0',
+				type: 'static',
+				path: '/invalid/',
+			}).success,
+		).toBe(false)
+		expect(
+			Module.safeParse({
+				name: 'full-with-path',
+				version: '1.0.0',
+				type: 'full',
+				path: '/invalid',
+			}).success,
+		).toBe(false)
+		expect(Module.parse({ name: 'legacy', version: '1.0.0' }).type).toBe('full')
+
+		await rm(join(fixtureDir, 'website', 'public'), {
+			recursive: true,
+			force: true,
+		})
+		await expect(new Modules(fixtureDir).load()).rejects.toThrow(
+			'missing public directory',
+		)
+	})
+
+	test('does not inspect public for disabled static modules', async () => {
+		await writeFile(
+			join(fixtureDir, 'website', '__module__.ts'),
+			`export default { name: 'website', version: '1.0.0', type: 'static', path: '/site', enabled: false }\n`,
+		)
+		await rm(join(fixtureDir, 'website', 'public'), {
+			recursive: true,
+			force: true,
+		})
+
+		const modules = new Modules(fixtureDir)
+		await modules.load()
+
+		expect(getModulesStats().totalModulesStatic).toBe(0)
+		expect(modules.getStaticRoutes().getRoutes()).toEqual({})
 	})
 
 	test('fails load with the file and reason for an invalid definition', async () => {
@@ -170,6 +262,34 @@ describe('getModulesStats', () => {
 			expect(modules.getWebSocketControllers()).toHaveLength(1)
 			expect(
 				warnings.some(args => String(args[0]).includes('ignores "websockets"')),
+			).toBe(true)
+		} finally {
+			setLogSink(defaultLogSink)
+		}
+	})
+
+	test('ignores application directories in static modules and emits a warning', async () => {
+		await mkdir(join(fixtureDir, 'website', 'controllers'), { recursive: true })
+		await writeFile(
+			join(fixtureDir, 'website', 'controllers', 'ignored.ts'),
+			`export default { name: 'ignored', version: '1.0.0', method: 'GET', path: '/ignored', handler: () => new Response('ignored') }\n`,
+		)
+
+		const warnings: unknown[][] = []
+		setLogSink({
+			debug: () => {},
+			info: () => {},
+			warn: (...args) => warnings.push(args),
+			error: () => {},
+		})
+
+		try {
+			const modules = new Modules(fixtureDir)
+			await modules.load()
+
+			expect(modules.getControllers()).toHaveLength(1)
+			expect(
+				warnings.some(args => String(args[0]).includes('ignores "controllers"')),
 			).toBe(true)
 		} finally {
 			setLogSink(defaultLogSink)
