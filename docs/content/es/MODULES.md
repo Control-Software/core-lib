@@ -3,7 +3,7 @@
 ## Propósito
 
 `Modules` descubre `**/__module__.ts` con `Bun.Glob`, valida manifests mediante
-Zod y carga comportamiento según el tipo de módulo.
+Zod y carga comportamiento o archivos públicos según el tipo de módulo.
 
 ## Contrato del manifest
 
@@ -22,7 +22,8 @@ export default {
 
 - `name: string`
 - `version: string`
-- `type?: 'mws' | 'share' | 'full'` (default: `full`)
+- `type?: 'mws' | 'share' | 'full'` (default: `full`), o `type: 'static'`
+- `path: string` es obligatorio sólo para `static` y se rechaza en los demás tipos
 - `enabled?: boolean` (default: `true`)
 - `initialize?: () => unknown | Promise<unknown>`
 - `dependencies?: Array<Record<string, unknown>>`
@@ -41,7 +42,8 @@ Los módulos habilitados cargan en este orden:
 
 1. todos los `mws`;
 2. todos los `share`;
-3. todos los `full`.
+3. todos los `full`;
+4. todos los `static`.
 
 El orden de descubrimiento dentro de cada grupo no es un contrato de
 dependencias.
@@ -80,6 +82,36 @@ un default export compatible.
 
 `initialize` se espera después de la carga propia del tipo. Para `full`, el
 orden es controllers, controllers WebSocket, eventos e inicialización.
+
+### `static`
+
+Requiere un `path` canónico y un directorio `public/` real. Cada archivo regular
+dentro de `public/`, incluidos los dotfiles, se registra como ruta nativa exacta
+de Bun para `GET`/`HEAD`. `index.html` también crea un alias de directorio y un
+redirect `308` desde el pathname sin barra, preservando la query.
+
+```ts
+import type { StaticModuleDefinition } from 's42-core'
+
+export default {
+	name: 'admin-ui',
+	version: '1.0.0',
+	type: 'static',
+	path: '/admin',
+	enabled: true,
+} satisfies StaticModuleDefinition
+```
+
+El loader rechaza directorios públicos ausentes, symlinks, entradas no
+soportadas del filesystem, paths de montaje inválidos y URLs estáticas
+duplicadas. Un `public/` vacío es válido con un warning. `controllers/`,
+`events/`, `mws/` y `websockets/` se ignoran con un warning. La inicialización
+se ejecuta después de completar el inventario de archivos.
+
+Obtener el registro con `getStaticRoutes()` y pasarlo a
+`Server.start({ StaticRoutes })`. Ver [RUTAS ESTÁTICAS](./STATIC_ROUTES.es.md)
+para mapeo de URLs, cache, rangos, precedencia, recarga y fronteras de
+seguridad.
 
 ## Constructor
 
@@ -206,6 +238,7 @@ Preferir mappings `EVENTS` explícitos para contratos estables.
 - `setEventsDomain(eventsDomain): this`
 - `getControllers()`
 - `getWebSocketControllers()`
+- `getStaticRoutes()`
 - `getHooks()`
 - `getSharedModules()`
 - `getLoadedModules()`
@@ -220,6 +253,8 @@ instancia.
 
 - `enabled: false` a nivel módulo omite el módulo.
 - El `enabled` de metadata de controlador no se usa para omitirlo.
+- Los archivos estáticos no pasan por hooks HTTP ni middleware de módulos. Usar
+  un controller HTTP para archivos protegidos.
 - El loader no parsea la metadata importada con el schema `Controllers`
   exportado.
 - Los middleware `mws` se adjuntan a controladores opt-in, por lo que
@@ -239,8 +274,9 @@ instancia.
 
 ## Estadísticas
 
-`getModulesStats()` devuelve totales por tipo, nombres y manifests normalizados
-de módulos cargados. Su registro es global al proceso.
+`getModulesStats()` devuelve totales por tipo, incluido `totalModulesStatic`,
+nombres y manifests normalizados de módulos cargados. Su registro es global al
+proceso.
 
 Las estadísticas de controllers WebSocket y conexiones activas usan el registro
 separado, global al proceso, `getWebSocketControllersStats()`.

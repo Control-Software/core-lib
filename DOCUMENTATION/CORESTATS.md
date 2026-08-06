@@ -2,8 +2,8 @@
 
 ## Purpose
 
-`CoreStats` reports S42-Core HTTP controller, WebSocket controller, module, and
-host command state.
+`CoreStats` reports S42-Core HTTP controller, WebSocket controller, module,
+static route, and host command state.
 
 ## Automatic route
 
@@ -26,6 +26,7 @@ await modules.load()
 await new Server().start({
 	port: 5678,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 ```
@@ -40,6 +41,7 @@ route to the existing router.
 - every registered endpoint;
 - every registered WebSocket path and its active connection count;
 - loaded module names, versions, types, and manifest data;
+- static module mount paths and aggregate file/route counts;
 - memory and disk output;
 - uptime;
 - connected-user output from `who`;
@@ -106,6 +108,9 @@ Repository helpers used by `RouteControllers` (not root package exports):
 		"totalModulesFull": 1,
 		"totalModulesShare": 0,
 		"totalModulesMws": 1,
+		"totalModulesStatic": 1,
+		"totalStaticFiles": 3,
+		"totalStaticRoutes": 5,
 		"totalWebSocketControllers": 1,
 		"activeWebSocketConnections": 2
 	},
@@ -114,6 +119,12 @@ Repository helpers used by `RouteControllers` (not root package exports):
 		"totalControllers": 1,
 		"activeConnections": 2,
 		"routes": [{ "path": "/ws/chat/:roomId", "activeConnections": 2 }]
+	},
+	"staticRoutes": {
+		"totalModules": 1,
+		"totalFiles": 3,
+		"totalRoutes": 5,
+		"paths": ["/admin"]
 	},
 	"modules": [
 		{ "name": "operators", "version": "1.0.0", "type": "full", "enabled": true }
@@ -167,10 +178,14 @@ treat the complete payload as operationally sensitive.
 
 ## Registry behavior
 
-HTTP controller, WebSocket controller, active-connection, and module statistics
-are process-wide. A controller is tracked when constructed; WebSocket counts
-change on `open`/`close`; modules are tracked when loaded. In a multi-process
-cluster, each worker reports its own process state.
+HTTP controller, WebSocket controller, active-connection, module, and static
+route statistics are process-wide. A controller is tracked when constructed;
+WebSocket counts change on `open`/`close`; modules and static inventories are
+tracked when loaded. In a multi-process cluster, each worker reports its own
+process state.
 
 The WebSocket section deliberately excludes topics, IPs, headers, query values,
 message payloads, and `ws.data`.
+
+The static section deliberately excludes physical filesystem paths and file
+names. Its `paths` array contains only public module mount paths.

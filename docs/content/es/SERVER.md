@@ -2,9 +2,9 @@
 
 ## Propósito
 
-`Server` encapsula `Bun.serve` y conecta un listener con
-`RouteControllers` HTTP, controllers WebSocket nativos, hooks HTTP globales e
-IPC de cluster.
+`Server` encapsula `Bun.serve` y conecta un listener con `RouteControllers`
+HTTP, rutas estáticas de módulos, controllers WebSocket nativos, hooks HTTP
+globales e IPC de cluster.
 
 ## Constructor
 
@@ -24,6 +24,7 @@ await server.start({
 	maxRequestBodySize: 1_000_000,
 	hooks: [],
 	RouteControllers: router,
+	StaticRoutes: staticRoutes,
 	WebSocketControllers: sockets,
 	development: false,
 	awaitForCluster: false,
@@ -39,13 +40,14 @@ await server.start({
 | `maxRequestBodySize`   |        `1_000_000` | Máximo de bytes del request body                        |
 | `hooks`                |               `[]` | Hooks globales de rutas                                 |
 | `RouteControllers`     |            ninguno | Mapa de rutas y callback fallback                       |
+| `StaticRoutes`         |            ninguno | Rutas exactas `GET`/`HEAD` de módulos estáticos         |
 | `WebSocketControllers` |            ninguno | Rutas WebSocket y handler Bun singleton                 |
 | `development`          |            `false` | Modo development de Bun                                 |
 | `awaitForCluster`      |            `false` | Espera un comando IPC `start` del padre                 |
 | `error`                | error HTML interno | Override del error handler de Bun                       |
 
-Sin `RouteControllers`, todo request HTTP que no sea un upgrade recibe un `404`
-en texto plano.
+Sin `RouteControllers` ni una entrada coincidente de `StaticRoutes`, todo
+request HTTP que no sea un upgrade recibe un `404` en texto plano.
 
 El default de source para `idleTimeout` del listener HTTP continúa en `300`.
 Bun 1.3.14 solamente acepta valores hasta `255`, por lo que en el runtime
@@ -56,10 +58,12 @@ handler WebSocket tiene otro `idleTimeout` dentro de `WebSocketControllers`.
 
 1. Construye el callback fallback con `RouteControllers.getCallback(hooks)`.
 2. Construye el mapa de rutas nativas con `RouteControllers.getRoutes(hooks)`.
-3. Con WebSockets, envuelve cada `GET` HTTP nativo, agrega entradas para paths
+3. Combina handlers estáticos exactos `GET`/`HEAD`. Una colisión exacta de
+   método/path con un controller HTTP rechaza el inicio.
+4. Con WebSockets, envuelve cada `GET` HTTP nativo, agrega entradas para paths
    solamente WebSocket y verifica el fallback antes de HTTP.
-4. Inicia `Bun.serve` con `routes`, `fetch` y un handler `websocket` compartido.
-5. Con `awaitForCluster`, crea primero el listener y luego mantiene pendiente la
+5. Inicia `Bun.serve` con `routes`, `fetch` y un handler `websocket` compartido.
+6. Con `awaitForCluster`, crea primero el listener y luego mantiene pendiente la
    promise de `start()` hasta recibir `start` desde el proceso padre.
 
 Sin espera de cluster, `start()` resuelve después de que `Bun.serve` crea el
@@ -100,6 +104,7 @@ const server = new Server()
 await server.start({
 	port: 5678,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 
@@ -124,6 +129,10 @@ console.info(server.getURL())
   método para removerlo.
 - Un server worker en cluster debe usar `clustering: true` para habilitar
   `reusePort` en Bun.
+- Las rutas estáticas evitan hooks HTTP y middleware de módulos. Servir archivos
+  protegidos mediante un `Controller` autenticado, no un módulo `static`.
 
 Ver [WEBSOCKETS](./WEBSOCKETS.es.md) para routing, autenticación, lifecycle,
 backpressure, pub/sub, módulos, cluster y seguridad.
+Ver [RUTAS ESTÁTICAS](./STATIC_ROUTES.es.md) para mapeo, cache, rangos,
+colisiones, recarga y la frontera de seguridad de `public/`.

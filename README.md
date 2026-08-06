@@ -5,8 +5,8 @@
 [Español](./README.es.md) · [Documentation](./DOCUMENTATION/ALL_EN.md) · [Website](https://s42core.com)
 
 S42-Core `3.0.12` is a Bun-first TypeScript backend framework for HTTP APIs,
-native WebSockets, module-oriented services, distributed domain events, and
-common persistence workloads.
+native WebSockets, module-oriented services and static assets, distributed
+domain events, and common persistence workloads.
 
 It is developed by **Cesar Casas** and **Stock42 LLC** with AI-assisted
 engineering workflows.
@@ -30,7 +30,8 @@ bun add s42-core
 - Typed, multi-route server WebSockets on the same Bun listener, with native
   pub/sub, backpressure, and compression plus framework metrics and shutdown.
 - Convention-based module discovery with `Bun.Glob`.
-- Three module types: `mws`, `share`, and `full`.
+- Four module types: `mws`, `share`, `full`, and `static`.
+- Native `GET`/`HEAD` delivery for each static module's `public/` directory.
 - Controller-level middleware selection.
 - Distributed events through Redis or SQS adapters.
 - MongoDB, Redis/Valkey, multi-engine SQL, and direct SQLite helpers.
@@ -49,6 +50,7 @@ const server = new Server()
 await server.start({
 	port: 5678,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 
@@ -92,6 +94,8 @@ order:
 1. `mws`: on-demand request middleware from `mws/index.ts`.
 2. `share`: reusable code and contracts; no automatic controller/event loading.
 3. `full`: controllers, WebSocket controllers, and events, all optional.
+4. `static`: exact native routes for every regular file below required
+   `public/`, mounted at the manifest's required `path`.
 
 Minimal manifest:
 
@@ -123,24 +127,29 @@ modules/
     controllers/
     websockets/
     events/
+  admin-ui/
+    __module__.ts
+    public/
+      index.html
 ```
 
 `dependencies` in a manifest is metadata; the current loader does not resolve
 or enforce dependency versions. See [MODULES](./DOCUMENTATION/MODULES.md) for
-the complete runtime contract.
+the complete runtime contract and
+[STATIC ROUTES](./DOCUMENTATION/STATIC_ROUTES.md) for public-file routing.
 
 ## Public Package API
 
 Only exports from [`src/index.ts`](./src/index.ts) are supported package imports.
 
-| Area            | Public exports                                                                                                          |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| HTTP/realtime   | `Server`, `RouteControllers`, `Controller`, `Res`, `WebSocketController`, `WebSocketControllers`, controller statistics |
-| Modules         | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats`                                               |
-| Events          | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                                                                |
-| Data            | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `SQLError`, `isSQLError`, `Dependencies`                                 |
-| Runtime         | `Cluster`, `SSE`, `CoreStats`                                                                                           |
-| Logging/testing | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`                                                            |
+| Area            | Public exports                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| HTTP/realtime   | `Server`, `RouteControllers`, `Controller`, `Res`, `WebSocketController`, `WebSocketControllers`, controller/static statistics |
+| Modules         | `Modules`, `Module`, `Model`, `Service`, `Controllers`, `getModulesStats`, static module/route contracts                       |
+| Events          | `EventsDomain`, `RedisEventsAdapter`, `SQSEventsAdapter`                                                                       |
+| Data            | `MongoClient`, `RedisClient`, `SQL`, `SQLite`, `SQLError`, `isSQLError`, `Dependencies`                                        |
+| Runtime         | `Cluster`, `SSE`, `CoreStats`                                                                                                  |
+| Logging/testing | `logger`, `setLogLevel`, `getLogLevel`, `setLogSink`, `Test`                                                                   |
 
 The package also exports the TypeScript types declared by the root entrypoint,
 including module, event, SQL, WebSocket, logger, SSE, CoreStats, and statistics
@@ -163,7 +172,8 @@ Component references:
   [CONTROLLER](./DOCUMENTATION/CONTROLLER.md),
   [RESPONSE](./DOCUMENTATION/RESPONSE.md),
   [WEBSOCKETS](./DOCUMENTATION/WEBSOCKETS.md),
-  [MODULES](./DOCUMENTATION/MODULES.md), and
+  [MODULES](./DOCUMENTATION/MODULES.md),
+  [STATIC ROUTES](./DOCUMENTATION/STATIC_ROUTES.md), and
   [CLUSTER](./DOCUMENTATION/CLUSTER.md)
 - Events: [EVENTSDOMAIN](./DOCUMENTATION/EVENTSDOMAIN.md)
 - Data: [REDISDB](./DOCUMENTATION/REDISDB.md),
@@ -194,6 +204,8 @@ Spanish component references use the `.es.md` suffix, beginning with
 - WebSocket authentication and authorization belong in the required `upgrade`
   callback; HTTP hooks do not run for the handshake. Native pub/sub and metrics
   are process-local in a cluster.
+- Everything below a static module's `public/` directory, including dotfiles,
+  is public and bypasses HTTP hooks. Use a controller for protected files.
 - MongoDB, Redis, and EventsDomain use process-wide singletons: the first
   configuration passed to `getInstance()` wins.
 

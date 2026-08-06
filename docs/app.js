@@ -22,8 +22,8 @@ const docsCatalog = [
 		file: 'GETTING_STARTED.md',
 		title: { en: 'Start here', es: 'Empieza aquí' },
 		description: {
-			en: 'Install, run a route, create a module, write an atomic transaction, and emit an event.',
-			es: 'Instala, ejecuta una ruta, crea un módulo, escribe una transacción atómica y emite un evento.',
+			en: 'Install, run a route, create a module, publish files, add WebSockets, and use data/events.',
+			es: 'Instala, ejecuta una ruta, crea un módulo, publica archivos, agrega WebSockets y usa datos/eventos.',
 		},
 	},
 	{
@@ -74,6 +74,16 @@ const docsCatalog = [
 		description: {
 			en: 'Discovery, manifests, load order, controller metadata, middleware, and event conventions.',
 			es: 'Discovery, manifests, orden de carga, metadata, middleware y convenciones de eventos.',
+		},
+	},
+	{
+		id: 'STATIC_ROUTES',
+		category: 'http',
+		file: 'STATIC_ROUTES.md',
+		title: { en: 'Static module routes', es: 'Rutas estáticas por módulo' },
+		description: {
+			en: 'Public directories, URL mapping, index aliases, ranges, collisions, reloads, and security.',
+			es: 'Directorios públicos, URLs, aliases index, rangos, colisiones, recarga y seguridad.',
 		},
 	},
 	{

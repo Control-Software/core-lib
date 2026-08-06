@@ -102,15 +102,47 @@ await modules.load()
 await new Server().start({
 	port: 3000,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 ```
 
 `Modules.load()` descubre `**/__module__.ts`, valida manifests y carga módulos
-habilitados en orden `mws`, `share` y `full`. Leer [Modules](./MODULES.es.md)
-antes de depender de convenciones de middleware o archivos de eventos.
+habilitados en orden `mws`, `share`, `full` y `static`. Leer
+[Modules](./MODULES.es.md) antes de depender de convenciones de middleware,
+archivos de eventos o archivos públicos.
 
-## 4. Agregar una ruta WebSocket nativa
+## 4. Publicar archivos desde un módulo
+
+```text
+modules/
+  website/
+    __module__.ts
+    public/
+      index.html
+      assets/app.css
+```
+
+```ts
+// modules/website/__module__.ts
+import type { StaticModuleDefinition } from 's42-core'
+
+export default {
+	name: 'website',
+	version: '1.0.0',
+	type: 'static',
+	path: '/site',
+} satisfies StaticModuleDefinition
+```
+
+Con la integración `StaticRoutes` anterior, `/site` redirige a `/site/`, que
+sirve `public/index.html`; `/site/assets/app.css` sirve el archivo CSS. Sólo se
+registran `GET` y `HEAD`. Todo dentro de `public/`, incluidos los dotfiles, es
+público y los symlinks se rechazan. Leer
+[Rutas estáticas por módulo](./STATIC_ROUTES.es.md) antes de publicar assets en
+producción.
+
+## 5. Agregar una ruta WebSocket nativa
 
 ```ts
 import { Server, WebSocketController, WebSocketControllers } from 's42-core'
@@ -145,7 +177,7 @@ Los hooks HTTP y `mws` de módulos no se ejecutan en handshakes WebSocket.
 Validar `Origin` en browser, configurar límites de payload/backpressure y usar
 `wss://` en producción. Continuar con [WebSockets](./WEBSOCKETS.es.md).
 
-## 5. Hacer un cambio SQL atómico
+## 6. Hacer un cambio SQL atómico
 
 ```ts
 import { SQL, isSQLError } from 's42-core'
@@ -190,7 +222,7 @@ idempotencia ni una política de retry. Leer la guía completa de
 [SQL](./SQL.es.md) para filtros, savepoints, transacciones distribuidas,
 ejecución raw, índices, errores y diferencias entre adaptadores.
 
-## 6. Publicar un evento de dominio
+## 7. Publicar un evento de dominio
 
 ```ts
 import { EventsDomain, RedisClient } from 's42-core'
@@ -218,13 +250,16 @@ topología de colas con retry/dead-letter explícitos cuando la entrega sea una
 invariante de negocio. Ver [EventsDomain](./EVENTSDOMAIN.es.md) y
 [Redis](./REDISDB.es.md).
 
-## 7. Checklist de producción
+## 8. Checklist de producción
 
 - Proveer un callback `Server.error` sanitizado.
 - Aplicar la política CORS en una frontera confiable; los headers del router son
   fijos.
 - Autenticar WebSockets en `upgrade`, validar `Origin` del browser y configurar
   límites de payload, backpressure e inactividad.
+- Tratar cada archivo dentro de `public/` de un módulo estático como público;
+  usar un controller para descargas protegidas y reiniciar/recargar después de
+  cambiar pathnames.
 - Llamar métodos `connect()` explícitos durante startup y cerrar clientes en
   shutdown.
 - Validar y limitar paginación en la frontera HTTP.

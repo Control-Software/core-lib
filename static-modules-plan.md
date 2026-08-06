@@ -1,8 +1,11 @@
 # Plan de módulos con archivos estáticos
 
-Estado: propuesta para revisión. No implementado.
+Estado: aprobado por el usuario e implementado.
 
 Fecha: 2026-08-06.
+
+Cierre técnico: 2026-08-06. La versión se mantuvo en `3.0.12`; no se realizó
+push, tag, publicación npm ni deploy.
 
 ## 1. Objetivo
 
@@ -584,15 +587,19 @@ Además:
 El `TS2307` baseline de `typecheck:modules` no se atribuirá a esta feature, pero
 cualquier error adicional sí bloquea el cierre.
 
-## 11. Estrategia de commits
+## 11. Estrategia de commits ejecutada
 
 Cada cambio terminado se commiteará por separado, sin mezclar trabajo ajeno:
 
 1. `docs: plan static module routes`
-2. `feat(static): add module definitions and file registry`
-3. `feat(server): serve static module routes`
-4. `docs(static): document static modules and public files`
-5. commit de release sólo si el usuario solicita un cambio de versión
+2. `docs(static): align module path naming`
+3. `feat(static): add module definitions and file registry`
+4. `feat(server): serve static module routes`
+5. `feat(static): expose route stats and module wiring`
+6. `docs(static): document static modules and public files`
+
+No hubo commit de release porque la versión ya era `3.0.12` y no se solicitó
+otra modificación.
 
 Los tests correspondientes se incluyen con el commit funcional que validan, no
 en un commit posterior que deje código intermedio sin cobertura.
@@ -637,3 +644,29 @@ La feature se considera completa cuando:
 
 Estas capacidades pueden diseñarse después sobre el registro de rutas, pero no
 forman parte del objetivo aprobado para esta primera entrega.
+
+## 14. Resultado de ejecución
+
+Las siete fases quedaron implementadas:
+
+- schema, carga y API pública para `type: 'static'` con `path` obligatorio;
+- inventario seguro `StaticRoutes`, aliases y redirects de `index.html`;
+- composición HTTP/estática/WebSocket en un único `Bun.serve()`;
+- semántica real de `GET`, `HEAD`, conditional GET, MIME y byte ranges;
+- estadísticas no sensibles en `getStaticRoutesStats()` y `CoreStats`;
+- tests unitarios y servidores HTTP/WebSocket efímeros de integración;
+- documentación canónica EN/ES y mirrors navegables del website.
+
+Validación de cierre:
+
+- `bun run typecheck`: correcto;
+- `bun run lint`: correcto;
+- `bun test`: 132 tests, 518 expectations, 0 fallos;
+- `bun run typecheck:modules`: solamente el `TS2307` baseline de
+  `modules/operators/controllers/operatorList.ts` hacia `../events/emit`;
+- mirrors Markdown EN/ES: byte-idénticos a sus fuentes;
+- catálogo del website: archivos EN/ES existentes y `STATIC_ROUTES` registrado;
+- `bun pm pack --dry-run`: 110 archivos, incluye `src/StaticRoutes` y ambas
+  guías, mantiene `s42-core-3.0.12.tgz` como nombre esperado y no publica ni
+  genera el artefacto;
+- `git diff --check`: correcto.

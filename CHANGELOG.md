@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Static modules and native file routes:** modules can declare
+  `type: 'static'` with a required `path` and publish every regular file below
+  `public/` through exact Bun `GET`/`HEAD` routes. The loader validates mount
+  paths, rejects symlinks and URL collisions, creates `index.html` aliases and
+  slash redirects, and keeps dotfiles addressable. `Server` composes the static
+  registry with HTTP and WebSocket routes; files retain Bun streaming/range
+  behavior plus `Last-Modified`/`If-Modified-Since`, while CoreStats reports
+  non-sensitive module, file, route, and public mount totals.
 - **Native server WebSockets:** added typed `WebSocketController<TData>` routes
   and a shared `WebSocketControllers` dispatcher on the existing `Bun.serve`
   listener. Handshakes support exact/parameter/wildcard matching, typed flat

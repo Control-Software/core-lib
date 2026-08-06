@@ -3,7 +3,7 @@
 ## Propósito
 
 `CoreStats` informa el estado de controllers HTTP, controllers WebSocket,
-módulos y comandos del host.
+módulos, rutas estáticas y comandos del host.
 
 ## Ruta automática
 
@@ -26,6 +26,7 @@ await modules.load()
 await new Server().start({
 	port: 5678,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 ```
@@ -40,6 +41,7 @@ al router existente.
 - todos los endpoints registrados;
 - todos los paths WebSocket registrados y su cantidad de conexiones activas;
 - nombres, versiones, tipos y manifest de módulos cargados;
+- paths públicos de módulos estáticos y totales agregados de archivos/rutas;
 - output de memoria y disco;
 - uptime;
 - usuarios conectados informados por `who`;
@@ -95,7 +97,10 @@ Helpers internos usados por `RouteControllers` (no exportados desde la raíz):
 Incluye:
 
 - `generatedAt`, `path` y `enabled`;
-- totales de controllers, endpoints y módulos por tipo;
+- totales de controllers, endpoints y módulos por tipo, incluido
+  `totalModulesStatic`;
+- `totalStaticFiles`, `totalStaticRoutes` y la sección `staticRoutes` con
+  `totalModules`, `totalFiles`, `totalRoutes` y `paths` públicos;
 - totales de controllers y conexiones WebSocket;
 - arrays `endpoints` y `modules`, más `webSockets.routes`;
 - `system.memory`, `system.disk`, `system.uptime`,
@@ -118,10 +123,14 @@ todo el payload como información operacional sensible.
 
 ## Comportamiento del registro
 
-Las estadísticas de controllers HTTP, controllers WebSocket, conexiones activas
-y módulos son globales al proceso. Un controller se registra al construirse,
-las conexiones cambian en `open`/`close` y un módulo se registra al cargarse. En
-un cluster multiproceso, cada worker informa su propio estado.
+Las estadísticas de controllers HTTP, controllers WebSocket, conexiones
+activas, módulos y rutas estáticas son globales al proceso. Un controller se
+registra al construirse, las conexiones cambian en `open`/`close` y los módulos
+con sus inventarios estáticos se registran al cargarse. En un cluster
+multiproceso, cada worker informa su propio estado.
 
 La sección WebSocket excluye deliberadamente topics, IPs, headers, valores de
 query, payloads y `ws.data`.
+
+La sección estática excluye deliberadamente paths físicos y nombres de archivo.
+Su array `paths` contiene solamente paths públicos de montaje de módulos.

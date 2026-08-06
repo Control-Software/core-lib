@@ -3,7 +3,7 @@
 ## Purpose
 
 `Modules` discovers `**/__module__.ts` with `Bun.Glob`, validates module
-manifests with Zod, and loads behavior according to module type.
+manifests with Zod, and loads behavior or public files according to module type.
 
 ## Manifest contract
 
@@ -22,7 +22,8 @@ export default {
 
 - `name: string`
 - `version: string`
-- `type?: 'mws' | 'share' | 'full'` (default: `full`)
+- `type?: 'mws' | 'share' | 'full'` (default: `full`), or `type: 'static'`
+- `path: string` is required only for `static` and rejected for other types
 - `enabled?: boolean` (default: `true`)
 - `initialize?: () => unknown | Promise<unknown>`
 - `dependencies?: Array<Record<string, unknown>>`
@@ -41,7 +42,8 @@ Enabled modules load in this order:
 
 1. all `mws`;
 2. all `share`;
-3. all `full`.
+3. all `full`;
+4. all `static`.
 
 Discovery order inside each group is not a dependency contract.
 
@@ -79,6 +81,36 @@ default export.
 
 `initialize` is awaited after the type-specific load step. For `full`, the
 order is controllers, WebSocket controllers, events, then initialization.
+
+### `static`
+
+Requires a canonical `path` and a real `public/` directory. Every regular file
+below `public/`, including dotfiles, is registered as an exact native Bun
+`GET`/`HEAD` route. `index.html` also creates a directory alias and a
+query-preserving `308` redirect from the slashless pathname.
+
+```ts
+import type { StaticModuleDefinition } from 's42-core'
+
+export default {
+	name: 'admin-ui',
+	version: '1.0.0',
+	type: 'static',
+	path: '/admin',
+	enabled: true,
+} satisfies StaticModuleDefinition
+```
+
+The loader rejects missing public directories, symlinks, unsupported
+filesystem entries, invalid mount paths, and duplicate static URLs. An empty
+`public/` is valid with a warning. `controllers/`, `events/`, `mws/`, and
+`websockets/` are ignored with a warning. Initialization runs after the file
+inventory is complete.
+
+Retrieve the registry with `getStaticRoutes()` and pass it to
+`Server.start({ StaticRoutes })`. See [STATIC ROUTES](./STATIC_ROUTES.md) for
+URL mapping, caching, range requests, routing precedence, reload behavior, and
+security boundaries.
 
 ## Constructor
 
@@ -205,6 +237,7 @@ Prefer explicit `EVENTS` mappings for stable contracts.
 - `setEventsDomain(eventsDomain): this`
 - `getControllers()`
 - `getWebSocketControllers()`
+- `getStaticRoutes()`
 - `getHooks()`
 - `getSharedModules()`
 - `getLoadedModules()`
@@ -218,6 +251,8 @@ Prefer explicit `EVENTS` mappings for stable contracts.
 
 - Module-level `enabled: false` skips the module.
 - Controller-level `enabled` metadata is not used to skip a controller.
+- Static files do not run through HTTP hooks or module middleware. Use an HTTP
+  controller for protected files.
 - Imported controller metadata is not parsed with the exported `Controllers`
   schema by the loader.
 - `mws` middleware is attached directly to opted-in controllers, so
@@ -237,8 +272,9 @@ Prefer explicit `EVENTS` mappings for stable contracts.
 
 ## Statistics
 
-`getModulesStats()` returns totals by type, module names, and the normalized
-loaded manifests. Its registry is process-wide.
+`getModulesStats()` returns totals by type, including `totalModulesStatic`,
+module names, and the normalized loaded manifests. Its registry is
+process-wide.
 
 WebSocket controller and active-connection statistics use the separate
 process-wide `getWebSocketControllersStats()` registry.

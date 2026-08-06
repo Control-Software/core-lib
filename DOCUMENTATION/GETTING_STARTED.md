@@ -101,15 +101,47 @@ await modules.load()
 await new Server().start({
 	port: 3000,
 	RouteControllers: new RouteControllers(modules.getControllers()),
+	StaticRoutes: modules.getStaticRoutes(),
 	hooks: modules.getHooks(),
 })
 ```
 
 `Modules.load()` discovers `**/__module__.ts`, validates manifests, and loads
-enabled `mws`, `share`, then `full` modules. Read [Modules](./MODULES.md) before
-depending on middleware or event-file conventions.
+enabled `mws`, `share`, `full`, then `static` modules. Read
+[Modules](./MODULES.md) before depending on middleware, event-file, or public
+file conventions.
 
-## 4. Add a native WebSocket route
+## 4. Publish public files from a module
+
+```text
+modules/
+  website/
+    __module__.ts
+    public/
+      index.html
+      assets/app.css
+```
+
+```ts
+// modules/website/__module__.ts
+import type { StaticModuleDefinition } from 's42-core'
+
+export default {
+	name: 'website',
+	version: '1.0.0',
+	type: 'static',
+	path: '/site',
+} satisfies StaticModuleDefinition
+```
+
+With the `StaticRoutes` wiring above, `/site` redirects to `/site/`, which
+serves `public/index.html`; `/site/assets/app.css` serves the CSS file. Only
+`GET` and `HEAD` are registered. Everything below `public/`, including
+dotfiles, is public and symlinks are rejected. See
+[Static module routes](./STATIC_ROUTES.md) before publishing assets in
+production.
+
+## 5. Add a native WebSocket route
 
 ```ts
 import { Server, WebSocketController, WebSocketControllers } from 's42-core'
@@ -144,7 +176,7 @@ HTTP hooks and module `mws` do not run for WebSocket handshakes. Validate
 browser `Origin`, configure payload/backpressure limits, and use `wss://` in
 production. Continue with [WebSockets](./WEBSOCKETS.md).
 
-## 5. Make an atomic SQL change
+## 6. Make an atomic SQL change
 
 ```ts
 import { SQL, isSQLError } from 's42-core'
@@ -189,7 +221,7 @@ or a retry policy. Read the complete [SQL guide](./SQL.md) for filters,
 savepoints, distributed transactions, raw execution, indexes, errors, and
 adapter differences.
 
-## 6. Publish a domain event
+## 7. Publish a domain event
 
 ```ts
 import { EventsDomain, RedisClient } from 's42-core'
@@ -217,12 +249,14 @@ queue topology with explicit retry/dead-letter semantics when delivery is a
 business invariant. See [EventsDomain](./EVENTSDOMAIN.md) and
 [Redis](./REDISDB.md).
 
-## 7. Production checklist
+## 8. Production checklist
 
 - Provide a sanitized `Server.error` callback.
 - Enforce your CORS policy at a trusted boundary; router CORS headers are fixed.
 - Authenticate WebSockets in `upgrade`, validate browser `Origin`, and set
   payload/backpressure/idle limits.
+- Treat every file below a static module's `public/` as public; use a controller
+  for protected downloads and restart/reload after pathname changes.
 - Call explicit database `connect()` methods during startup and close clients
   during shutdown.
 - Validate and cap pagination inputs at the HTTP boundary.
