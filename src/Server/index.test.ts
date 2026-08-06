@@ -1,9 +1,44 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { dirname, join } from 'node:path'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { Controller } from '../Controller'
 import { RouteControllers } from '../RouteControllers'
+import { clearStaticRoutesStats, StaticRoutesRegistry } from '../StaticRoutes'
 import { WebSocketController } from '../WebSocketController'
 import { WebSocketControllers } from '../WebSocketControllers'
 import { Server } from './index'
+
+type StaticFixture = {
+	rootDirectory: string
+	publicDirectory: string
+	routes: StaticRoutesRegistry
+}
+
+async function createStaticFixture(
+	path: string,
+	files: Record<string, string | Uint8Array>,
+): Promise<StaticFixture> {
+	const rootDirectory = await mkdtemp(join(tmpdir(), 's42-core-server-static-'))
+	const publicDirectory = join(rootDirectory, 'public')
+	await mkdir(publicDirectory)
+
+	for (const [relativePath, contents] of Object.entries(files)) {
+		const filePath = join(publicDirectory, relativePath)
+		await mkdir(dirname(filePath), { recursive: true })
+		await writeFile(filePath, contents)
+	}
+
+	const routes = new StaticRoutesRegistry()
+	await routes.addModule({
+		name: 'test-static',
+		version: '1.0.0',
+		path,
+		publicDirectory,
+	})
+
+	return { rootDirectory, publicDirectory, routes }
+}
 
 function getHTTPURL(server: Server, path: string): string {
 	const port = server.getPort()
@@ -92,7 +127,229 @@ async function waitFor(condition: () => boolean, message: string): Promise<void>
 	throw new Error(message)
 }
 
-describe('Server WebSocket integration', () => {
+afterEach(() => {
+	clearStaticRoutesStats()
+})
+
+describe('Server integration', () => {
+	test('serves static module files with native HTTP semantics', async () => {
+		const fixture = await createStaticFixture('/site', {
+			'index.html': '<h1>Site</h1>',
+			'assets/app.css': 'body{}',
+			'assets/data.bin': new Uint8Array([0, 1, 2, 3, 4]),
+			'assets/font.woff2': new Uint8Array([5, 6, 7]),
+			'.well-known/security.txt': 'contact@example.com',
+			'space #%.txt': 'reserved',
+			'café.txt': 'unicode',
+		})
+		const rootPublicDirectory = join(fixture.rootDirectory, 'root-public')
+		await mkdir(rootPublicDirectory)
+		await writeFile(join(rootPublicDirectory, 'index.html'), '<h1>Root</h1>')
+		await fixture.routes.addModule({
+			name: 'root-static',
+			version: '1.0.0',
+			path: '/',
+			publicDirectory: rootPublicDirectory,
+		})
+
+		const server = new Server()
+		await server.start({ port: 0, idleTimeout: 120, StaticRoutes: fixture.routes })
+
+		try {
+			expect(await (await fetch(getHTTPURL(server, '/'))).text()).toBe('<h1>Root</h1>')
+
+			const redirect = await fetch(getHTTPURL(server, '/site?theme=dark'), {
+				redirect: 'manual',
+			})
+			expect(redirect.status).toBe(308)
+			expect(redirect.headers.get('location')).toBe('/site/?theme=dark')
+			expect(await (await fetch(getHTTPURL(server, '/site/'))).text()).toBe(
+				'<h1>Site</h1>',
+			)
+			expect(
+				await (await fetch(getHTTPURL(server, '/site/index.html?cache=bust'))).text(),
+			).toBe('<h1>Site</h1>')
+
+			expect(
+				await (await fetch(getHTTPURL(server, '/site/.well-known/security.txt'))).text(),
+			).toBe('contact@example.com')
+			expect(
+				await (await fetch(getHTTPURL(server, '/site/space%20%23%25.txt'))).text(),
+			).toBe('reserved')
+			expect(await (await fetch(getHTTPURL(server, '/site/caf%C3%A9.txt'))).text()).toBe(
+				'unicode',
+			)
+
+			const cssResponse = await fetch(getHTTPURL(server, '/site/assets/app.css'))
+			expect(cssResponse.status).toBe(200)
+			expect(cssResponse.headers.get('content-type')).toBe('text/css;charset=utf-8')
+			expect(cssResponse.headers.get('content-length')).toBe('6')
+			expect(cssResponse.headers.get('last-modified')).not.toBeNull()
+			expect(await cssResponse.text()).toBe('body{}')
+
+			const headResponse = await fetch(getHTTPURL(server, '/site/assets/app.css'), {
+				method: 'HEAD',
+			})
+			expect(headResponse.status).toBe(200)
+			expect(headResponse.headers.get('content-type')).toBe('text/css;charset=utf-8')
+			expect(headResponse.headers.get('content-length')).toBe('6')
+			expect(headResponse.headers.get('last-modified')).not.toBeNull()
+			expect(await headResponse.text()).toBe('')
+
+			const conditionalResponse = await fetch(
+				getHTTPURL(server, '/site/assets/app.css'),
+				{
+					headers: {
+						'If-Modified-Since': cssResponse.headers.get('last-modified') ?? '',
+					},
+				},
+			)
+			expect(conditionalResponse.status).toBe(304)
+			expect(await conditionalResponse.text()).toBe('')
+
+			const rangeResponse = await fetch(getHTTPURL(server, '/site/assets/data.bin'), {
+				headers: { Range: 'bytes=1-3' },
+			})
+			expect(rangeResponse.status).toBe(206)
+			expect(rangeResponse.headers.get('content-range')).toBe('bytes 1-3/5')
+			expect(new Uint8Array(await rangeResponse.arrayBuffer())).toEqual(
+				new Uint8Array([1, 2, 3]),
+			)
+
+			const invalidRange = await fetch(getHTTPURL(server, '/site/assets/data.bin'), {
+				headers: { Range: 'bytes=99-100' },
+			})
+			expect(invalidRange.status).toBe(416)
+			expect(
+				(await fetch(getHTTPURL(server, '/site/assets/font.woff2'))).headers.get(
+					'content-type',
+				),
+			).toBe('font/woff2')
+
+			expect(
+				(
+					await fetch(getHTTPURL(server, '/site/assets/app.css'), {
+						method: 'POST',
+					})
+				).status,
+			).toBe(404)
+			expect((await fetch(getHTTPURL(server, '/site/assets/'))).status).toBe(404)
+			expect(
+				(await fetch(getHTTPURL(server, '/site/%252e%252e/private.txt'))).status,
+			).toBe(404)
+
+			await writeFile(join(fixture.publicDirectory, 'assets', 'app.css'), 'new{}')
+			expect(await (await fetch(getHTTPURL(server, '/site/assets/app.css'))).text()).toBe(
+				'new{}',
+			)
+
+			await writeFile(join(fixture.publicDirectory, 'added.txt'), 'not registered')
+			expect((await fetch(getHTTPURL(server, '/site/added.txt'))).status).toBe(404)
+			await rm(join(fixture.publicDirectory, 'assets', 'app.css'))
+			expect((await fetch(getHTTPURL(server, '/site/assets/app.css'))).status).toBe(404)
+		} finally {
+			await server.stop(true)
+			await rm(fixture.rootDirectory, { recursive: true, force: true })
+		}
+	})
+
+	test('composes static routes with controller methods and rejects exact collisions', async () => {
+		const fixture = await createStaticFixture('/assets', {
+			'item.txt': 'static item',
+		})
+		const server = new Server()
+		const controllers = new RouteControllers([
+			new Controller('POST', '/assets/item.txt', async (_request, response) => {
+				return response.json({ source: 'controller' })
+			}),
+			new Controller('GET', '/assets/*', async (_request, response) => {
+				return response.json({ source: 'wildcard' })
+			}),
+		])
+
+		await server.start({
+			port: 0,
+			idleTimeout: 120,
+			RouteControllers: controllers,
+			StaticRoutes: fixture.routes,
+		})
+
+		try {
+			expect(await (await fetch(getHTTPURL(server, '/assets/item.txt'))).text()).toBe(
+				'static item',
+			)
+			expect(
+				await (
+					await fetch(getHTTPURL(server, '/assets/item.txt'), { method: 'POST' })
+				).json(),
+			).toEqual({ source: 'controller' })
+			expect(await (await fetch(getHTTPURL(server, '/assets/other.txt'))).json()).toEqual(
+				{ source: 'wildcard' },
+			)
+		} finally {
+			await server.stop(true)
+		}
+
+		const collidingServer = new Server()
+		const collidingControllers = new RouteControllers([
+			new Controller('GET', '/assets/item.txt', async (_request, response) => {
+				return response.text('controller item')
+			}),
+		])
+		await expect(
+			collidingServer.start({
+				port: 0,
+				RouteControllers: collidingControllers,
+				StaticRoutes: fixture.routes,
+			}),
+		).rejects.toThrow(
+			'Static route collision for GET "/assets/item.txt" from test-static@1.0.0 public/item.txt with an HTTP controller',
+		)
+		expect(collidingServer.getPort()).toBeUndefined()
+		await rm(fixture.rootDirectory, { recursive: true, force: true })
+	})
+
+	test('attempts WebSocket upgrade before a static GET on the same path', async () => {
+		const fixture = await createStaticFixture('/shared', {
+			'socket.txt': 'static fallback',
+		})
+		const server = new Server()
+		const sockets = new WebSocketControllers([
+			new WebSocketController({
+				path: '/shared/socket.txt',
+				upgrade: () => ({ data: {} }),
+				message: (ws, message) => ws.send(message),
+			}),
+		])
+
+		await server.start({
+			port: 0,
+			idleTimeout: 120,
+			StaticRoutes: fixture.routes,
+			WebSocketControllers: sockets,
+		})
+
+		let socket: WebSocket | undefined
+		try {
+			expect(await (await fetch(getHTTPURL(server, '/shared/socket.txt'))).text()).toBe(
+				'static fallback',
+			)
+
+			socket = await openWebSocket(getWebSocketURL(server, '/shared/socket.txt'))
+			const echoed = nextMessage(socket)
+			socket.send('through-websocket')
+			expect(String((await echoed).data)).toBe('through-websocket')
+		} finally {
+			if (socket && socket.readyState < WebSocket.CLOSING) {
+				const closed = nextClose(socket)
+				socket.close()
+				await closed
+			}
+			await server.stop(true)
+			await rm(fixture.rootDirectory, { recursive: true, force: true })
+		}
+	})
+
 	test('keeps HTTP behavior unchanged without WebSocket configuration', async () => {
 		const server = new Server()
 		const routes = new RouteControllers([

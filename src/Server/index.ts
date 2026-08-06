@@ -1,6 +1,7 @@
 import { serve, sleep, type Server as ServerBun } from 'bun'
 import { type RouteControllers } from '../RouteControllers'
 import { logger } from '../Logger'
+import { type StaticRoutes } from '../StaticRoutes'
 import { type WebSocketData } from '../WebSocketController'
 import { type WebSocketControllers } from '../WebSocketControllers'
 
@@ -16,6 +17,7 @@ export type TypeServerConstructor = {
 	hooks?: Array<TypeHook>
 	RouteControllers?: RouteControllers
 	WebSocketControllers?: WebSocketControllers
+	StaticRoutes?: StaticRoutes
 	development?: boolean
 	awaitForCluster?: boolean
 }
@@ -85,6 +87,7 @@ export class Server {
 			hooks = [],
 			RouteControllers,
 			WebSocketControllers,
+			StaticRoutes,
 			development = false,
 			awaitForCluster = false,
 		} = properties
@@ -96,7 +99,10 @@ export class Server {
 			:	async (req: Request) => {
 					return new Response(`Not Found ${new URL(req.url).pathname}`, { status: 404 })
 				}
-		const httpRoutes = RouteControllers?.getRoutes(hooks)
+		const httpRoutes = this.composeHTTPRoutes(
+			RouteControllers?.getRoutes(hooks),
+			StaticRoutes,
+		)
 		const baseOptions = {
 			port,
 			reusePort: clustering,
@@ -139,10 +145,9 @@ export class Server {
 			})
 			this.webSocketControllers = WebSocketControllers
 		} else {
-			const routes = this.composeHTTPRoutes(httpRoutes)
 			this.server = serve<WebSocketData, string>({
 				...baseOptions,
-				routes,
+				routes: httpRoutes,
 				fetch: async request => callback(request),
 			})
 			this.webSocketControllers = undefined
@@ -155,6 +160,7 @@ export class Server {
 
 	private composeHTTPRoutes(
 		httpRoutes: ReturnType<RouteControllers['getRoutes']> | undefined,
+		staticRoutes: StaticRoutes | undefined,
 	): HTTPServerRoutes {
 		const routes: HTTPServerRoutes = {}
 
@@ -170,17 +176,39 @@ export class Server {
 			routes[path] = routeHandlers
 		}
 
+		for (const [path, handlers] of Object.entries(staticRoutes?.getRoutes() ?? {})) {
+			const routeHandlers = routes[path] ?? {}
+
+			for (const [method, handler] of Object.entries(handlers)) {
+				const httpMethod = method as Bun.Serve.HTTPMethod
+				if (routeHandlers[httpMethod]) {
+					const metadata = staticRoutes?.getRouteMetadata(path)
+					const source =
+						metadata ?
+							`${metadata.moduleName}@${metadata.moduleVersion} public/${metadata.relativePath}`
+						:	'unknown static module'
+					throw new TypeError(
+						`Static route collision for ${httpMethod} "${path}" from ${source} with an HTTP controller.`,
+					)
+				}
+
+				routeHandlers[httpMethod] = request => handler(request)
+			}
+
+			routes[path] = routeHandlers
+		}
+
 		return routes
 	}
 
 	private composeWebSocketRoutes(
-		httpRoutes: ReturnType<RouteControllers['getRoutes']> | undefined,
+		httpRoutes: HTTPServerRoutes,
 		fallback: (request: Request) => Promise<Response>,
 		webSocketControllers: WebSocketControllers,
 	): ServerRoutes {
 		const routes: ServerRoutes = {}
 
-		for (const [path, handlers] of Object.entries(httpRoutes ?? {})) {
+		for (const [path, handlers] of Object.entries(httpRoutes)) {
 			const routeHandlers: Partial<Record<Bun.Serve.HTTPMethod, ServerRouteHandler>> = {}
 
 			for (const [method, handler] of Object.entries(handlers)) {
@@ -188,7 +216,7 @@ export class Server {
 				routeHandlers[httpMethod] =
 					httpMethod === 'GET' ?
 						this.withWebSocketUpgrade(handler, webSocketControllers)
-					:	request => handler(request)
+					:	(request, bunServer) => handler(request, bunServer)
 			}
 
 			routes[path] = routeHandlers
@@ -206,7 +234,7 @@ export class Server {
 	}
 
 	private withWebSocketUpgrade(
-		httpHandler: (request: Request) => Promise<Response>,
+		httpHandler: HTTPServerRouteHandler,
 		webSocketControllers: WebSocketControllers,
 	): ServerRouteHandler {
 		return async (request, bunServer) => {
@@ -215,7 +243,7 @@ export class Server {
 				return upgraded.response
 			}
 
-			return httpHandler(request)
+			return httpHandler(request, bunServer)
 		}
 	}
 
