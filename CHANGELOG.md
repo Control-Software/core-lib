@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.0.12] - 2026-08-06
+
 ### Added
 
 - **Native server WebSockets:** added typed `WebSocketController<TData>` routes

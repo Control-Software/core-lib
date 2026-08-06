@@ -1,7 +1,8 @@
 # Plan de soporte WebSocket nativo
 
-Estado: aprobado e implementado. Fases 0–6 completas; release minor diferida
-hasta que el usuario cierre el bloque `[Unreleased]`.
+Estado: aprobado e implementado. Fases 0–7 completas; release `3.0.12`
+preparada localmente por indicación explícita del usuario, sin push, tag,
+publicación ni deploy.
 
 Fecha: 2026-08-05.
 
@@ -675,19 +676,21 @@ de carga manual reproducible para validar `drain`.
 
 ### Fase 7 — Release
 
-- [x] Tratar la API nueva como feature aditiva: release minor bajo SemVer.
-- [x] No fijar ni subir versión mientras continúe entrando trabajo al bloque
-      `[Unreleased]`.
-- [ ] Antes del release, sincronizar versión en `package.json`, lockfile,
-      README EN/ES, master docs, website/manifest y changelog.
-- [ ] Verificar `bun run typecheck`, `bun run lint`, `bun test`, Prettier,
+- [x] Registrar que la API es aditiva y que el usuario eligió explícitamente la
+      release patch `3.0.12`, reemplazando la propuesta minor inicial.
+- [x] Fijar la versión solamente después de recibir la indicación explícita del
+      usuario para cerrar el bloque `[Unreleased]`.
+- [x] Sincronizar versión en `package.json`, README EN/ES, master docs,
+      website/manifest y changelog; `bun.lock` no almacena la versión del
+      workspace.
+- [x] Verificar `bun run typecheck`, `bun run lint`, `bun test`, Prettier,
       mirrors documentales y `git diff --check`.
-- [ ] Inspeccionar el tarball y confirmar que todos los nuevos sources/types y
+- [x] Inspeccionar el tarball y confirmar que todos los nuevos sources/types y
       documentos publicados están incluidos.
-- [ ] Crear commits por cambios coherentes y un commit de release separado.
-- [ ] No publicar npm, taggear ni desplegar sin pedido explícito.
+- [x] Crear commits por cambios coherentes y un commit de release separado.
+- [x] No publicar npm, taggear ni desplegar sin pedido explícito.
 
-### Resultado de ejecución al 2026-08-05
+### Resultado de ejecución al 2026-08-06
 
 Las fases 0–6 quedaron implementadas en commits coherentes: API/dispatcher,
 integración con `Server`, descubrimiento modular/CoreStats y documentación. La
@@ -710,9 +713,9 @@ Snapshot de preparación de release:
   incompatible con el máximo `255` de ese runtime; los ejemplos usan `120` y
   corregir el default queda fuera de este cambio.
 
-Los checks de la Fase 7 permanecen abiertos porque entrarán más cambios en
-`[Unreleased]`: deben repetirse sobre el commit exacto que se vaya a versionar.
-La versión continúa en `3.0.11`; no se creó tag, no se publicó y no se desplegó.
+Los checks de la Fase 7 se repitieron sobre el contenido exacto preparado para
+la release. La versión es `3.0.12`; no se creó tag, no se publicó, no se hizo
+push y no se desplegó.
 
 ## 11. Criterios de aceptación
 
