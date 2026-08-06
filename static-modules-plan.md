@@ -38,7 +38,7 @@ export default {
 	name: 'admin-ui',
 	version: '1.0.0',
 	type: 'static',
-	mountPath: '/admin',
+	path: '/admin',
 	enabled: true,
 } satisfies StaticModuleDefinition
 ```
@@ -86,7 +86,7 @@ Referencias oficiales usadas:
 
 ### 3.1 El punto de montaje es obligatorio
 
-Un módulo `static` tendrá que declarar `mountPath`. No se derivará de `name` ni
+Un módulo `static` tendrá que declarar `path`. No se derivará de `name` ni
 se asumirá `/` silenciosamente.
 
 Esto evita que agregar un segundo módulo publique archivos accidentalmente en
@@ -98,11 +98,11 @@ export default {
 	name: 'website',
 	version: '1.0.0',
 	type: 'static',
-	mountPath: '/',
+	path: '/',
 } satisfies StaticModuleDefinition
 ```
 
-`mountPath` debe:
+`path` debe:
 
 - ser una ruta absoluta que comience con `/`;
 - ser `/` o no terminar en `/`;
@@ -131,7 +131,7 @@ export default {
 Cada archivo regular genera una ruta exacta formada por:
 
 ```text
-mountPath + ruta relativa dentro de public/
+path + ruta relativa dentro de public/
 ```
 
 Reglas:
@@ -160,7 +160,7 @@ Para conservar URLs relativas correctas:
   `public/index.html`;
 - `GET /admin/docs` redirige con `308` a `/admin/docs/` cuando existe
   `public/docs/index.html`;
-- con `mountPath: '/'`, `/` sirve el `index.html` raíz sin redirección.
+- con `path: '/'`, `/` sirve el `index.html` raíz sin redirección.
 
 Los redirects aplican también a `HEAD` y preservan la query string original.
 
@@ -210,7 +210,7 @@ export type StaticModuleDefinition = {
 	name: string
 	version: string
 	type: 'static'
-	mountPath: string
+	path: string
 	enabled?: boolean
 	initialize?: () => Promise<unknown> | unknown
 	dependencies?: Array<Record<string, unknown>>
@@ -221,7 +221,7 @@ El tipo real se derivará del mismo contrato validado por Zod; el bloque anterio
 describe su forma pública, no una segunda definición mantenida a mano.
 
 La implementación del schema debe conservar `type: 'full'` como default para
-los manifests existentes. `mountPath` será obligatorio sólo cuando
+los manifests existentes. `path` será obligatorio sólo cuando
 `type === 'static'` y se rechazará si aparece en otro tipo, para detectar errores
 de configuración.
 
@@ -306,7 +306,7 @@ branch HTTP-only y el branch WebSocket:
 Se falla antes de abrir el puerto cuando:
 
 - dos módulos generan el mismo pathname y método;
-- dos módulos usan exactamente el mismo `mountPath`;
+- dos módulos usan exactamente el mismo `path`;
 - un archivo, alias o redirect generado colisiona con otro del mismo módulo;
 - una ruta estática `GET` o `HEAD` colisiona con un controller exacto para el
   mismo método.
@@ -369,7 +369,7 @@ La implementación debe cubrir explícitamente:
 - inventario de archivos regulares únicamente;
 - inclusión consciente de dotfiles dentro de `public/`;
 - rechazo de todos los symlinks;
-- rechazo de path traversal y separadores no portables en `mountPath`;
+- rechazo de path traversal y separadores no portables en `path`;
 - rutas exactas precomputadas, sin resolver paths proporcionados por el
   request;
 - detección de colisiones antes de escuchar conexiones;
@@ -391,7 +391,7 @@ descubrimiento.
 - `Server.stop()` no necesita lógica especial: las respuestas de archivo
   participan del lifecycle HTTP existente.
 - El inventario queda congelado para la vida de la instancia de rutas.
-- Los logs de arranque informan módulo, `mountPath` y cantidad de archivos, sin
+- Los logs de arranque informan módulo, `path` y cantidad de archivos, sin
   listar todo el árbol salvo en nivel `debug`.
 
 `ModulesStats` agregará:
@@ -407,7 +407,7 @@ export type StaticRoutesStats = {
 	totalModules: number
 	totalFiles: number
 	totalRoutes: number // incluye aliases y redirects
-	mountPaths: string[]
+	paths: string[]
 }
 ```
 
@@ -447,7 +447,7 @@ Tareas:
 
 1. Extender el schema de `Module` sin alterar el default `full`.
 2. Agregar y exportar `StaticModuleDefinition`.
-3. Validar `mountPath` de forma condicional.
+3. Validar `path` de forma condicional.
 4. Incorporar el grupo `static` al orden de carga, después de los grupos
    actuales para no cambiar su orden relativo.
 5. Registrar `totalModulesStatic` y devolver static modules desde
@@ -604,7 +604,7 @@ La feature se considera completa cuando:
 - `type: 'static'` forma parte del schema y API pública sin romper manifests
   existentes;
 - todo archivo regular, incluidos dotfiles, dentro de `public/` tiene una URL
-  determinista bajo `mountPath`;
+  determinista bajo `path`;
 - symlinks y configuraciones ambiguas se rechazan al cargar;
 - `index.html`, redirects y rutas anidadas siguen las reglas documentadas;
 - sólo `GET` y `HEAD` sirven contenido;
