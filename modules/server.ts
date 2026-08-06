@@ -1,4 +1,10 @@
-import { Server, RouteControllers, Modules, EventsDomain } from '../src'
+import {
+	Server,
+	RouteControllers,
+	Modules,
+	EventsDomain,
+	WebSocketControllers,
+} from '../src'
 
 export async function server() {
 	console.info('Modules server testing v1.0')
@@ -8,6 +14,7 @@ export async function server() {
 	const modules = new Modules('./modules/', EventsDomain.getInstance())
 	await modules.load()
 	const modulesHooks = modules.getHooks()
+	const webSocketControllers = modules.getWebSocketControllers()
 
 	apiServer.start({
 		port: Number.parseInt(String(process?.env?.SERVER_PORT ?? 4455), 10),
@@ -42,6 +49,11 @@ export async function server() {
 			},
 		],
 		RouteControllers: new RouteControllers([...modules.getControllers()]),
+		StaticRoutes: modules.getStaticRoutes(),
+		WebSocketControllers:
+			webSocketControllers.length > 0 ?
+				new WebSocketControllers(webSocketControllers)
+			: 	undefined,
 	})
 
 	console.info(

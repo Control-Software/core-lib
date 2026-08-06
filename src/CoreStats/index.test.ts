@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { clearControllersStats, Controller, getControllersStats } from '../Controller'
-import { clearModulesStats } from '../Modules'
+import { clearModulesStats, Modules } from '../Modules'
 import { RouteControllers } from '../RouteControllers'
+import { clearStaticRoutesStats } from '../StaticRoutes'
 import {
 	clearWebSocketControllersStats,
 	WebSocketController,
@@ -39,15 +43,23 @@ Mem:            2048        1024         512          10         512        1536
 }
 
 describe('CoreStats', () => {
-	beforeEach(() => {
+	let fixtureDir = ''
+
+	beforeEach(async () => {
 		clearControllersStats()
 		clearModulesStats()
 		clearWebSocketControllersStats()
+		clearStaticRoutesStats()
 		delete process.env.ENABLE_CORE_STATS
+		fixtureDir = await mkdtemp(join(tmpdir(), 's42-core-stats-'))
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		delete process.env.ENABLE_CORE_STATS
+		clearStaticRoutesStats()
+		if (fixtureDir) {
+			await rm(fixtureDir, { recursive: true, force: true })
+		}
 	})
 
 	test('does not inject the stats route when disabled', () => {
@@ -64,6 +76,17 @@ describe('CoreStats', () => {
 
 	test('injects the stats route automatically and returns stats payload', async () => {
 		process.env.ENABLE_CORE_STATS = 'true'
+		await mkdir(join(fixtureDir, 'website', 'public'), { recursive: true })
+		await writeFile(
+			join(fixtureDir, 'website', '__module__.ts'),
+			`export default { name: 'website', version: '1.0.0', type: 'static', path: '/site' }\n`,
+		)
+		await writeFile(
+			join(fixtureDir, 'website', 'public', 'index.html'),
+			'<h1>Website</h1>',
+		)
+		const modules = new Modules(fixtureDir)
+		await modules.load()
 
 		const health = new Controller('GET', '/health', async (_req, res) => {
 			return res.json({ ok: true })
@@ -89,7 +112,10 @@ describe('CoreStats', () => {
 		expect(getControllersStats().totalControllers).toBe(3)
 		expect(stats.summary.totalControllers).toBe(3)
 		expect(stats.summary.totalEndpoints).toBe(4)
-		expect(stats.summary.totalModulesLoaded).toBe(0)
+		expect(stats.summary.totalModulesLoaded).toBe(1)
+		expect(stats.summary.totalModulesStatic).toBe(1)
+		expect(stats.summary.totalStaticFiles).toBe(1)
+		expect(stats.summary.totalStaticRoutes).toBe(3)
 		expect(stats.summary.totalWebSocketControllers).toBe(1)
 		expect(stats.summary.activeWebSocketConnections).toBe(0)
 		expect(stats.endpoints).toEqual([
@@ -103,6 +129,19 @@ describe('CoreStats', () => {
 			activeConnections: 0,
 			routes: [{ path: '/ws/users/:userId', activeConnections: 0 }],
 		})
+		expect(stats.staticRoutes).toEqual({
+			totalModules: 1,
+			totalFiles: 1,
+			totalRoutes: 3,
+			paths: ['/site'],
+		})
+		expect(stats.modules).toEqual([
+			expect.objectContaining({
+				name: 'website',
+				type: 'static',
+				path: '/site',
+			}),
+		])
 		expect(stats.system.memory.totalMB).toBe(2048)
 		expect(stats.system.memory.usedMB).toBe(1024)
 		expect(stats.system.memory.availableMB).toBe(1536)

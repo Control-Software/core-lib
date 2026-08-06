@@ -10,6 +10,7 @@ export {
 	type CoreStatsModule,
 	type CoreStatsMemory,
 	type CoreStatsPayload,
+	type CoreStatsStaticRoutes,
 	type CoreStatsSystem,
 	type CoreStatsWebSockets,
 } from './CoreStats'

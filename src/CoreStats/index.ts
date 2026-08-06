@@ -6,6 +6,7 @@ import {
 	type ControllerStatsEndpoint,
 } from '../Controller'
 import { getModulesStats, type ModuleType } from '../Modules'
+import { getStaticRoutesStats, type StaticRoutesStats } from '../StaticRoutes'
 import {
 	getWebSocketControllersStats,
 	type WebSocketControllersStats,
@@ -14,6 +15,7 @@ import {
 export type CoreStatsModule = ModuleType
 export type CoreStatsEndpoint = ControllerStatsEndpoint
 export type CoreStatsWebSockets = WebSocketControllersStats
+export type CoreStatsStaticRoutes = StaticRoutesStats
 export type CoreStatsCommand =
 	| 'free -m'
 	| 'df -h'
@@ -85,11 +87,15 @@ export type CoreStatsPayload = {
 		totalModulesFull: number
 		totalModulesShare: number
 		totalModulesMws: number
+		totalModulesStatic: number
+		totalStaticFiles: number
+		totalStaticRoutes: number
 		totalWebSocketControllers: number
 		activeWebSocketConnections: number
 	}
 	endpoints: CoreStatsEndpoint[]
 	webSockets: CoreStatsWebSockets
+	staticRoutes: CoreStatsStaticRoutes
 	modules: CoreStatsModule[]
 	system: CoreStatsSystem
 }
@@ -141,12 +147,14 @@ export class CoreStats {
 	}
 
 	public async getStats(): Promise<CoreStatsPayload> {
-		const [controllersStats, modulesStats, webSocketStats, system] = await Promise.all([
-			Promise.resolve(getControllersStats()),
-			Promise.resolve(getModulesStats()),
-			Promise.resolve(getWebSocketControllersStats()),
-			this.getSystemStats(),
-		])
+		const [controllersStats, modulesStats, webSocketStats, staticRoutes, system] =
+			await Promise.all([
+				Promise.resolve(getControllersStats()),
+				Promise.resolve(getModulesStats()),
+				Promise.resolve(getWebSocketControllersStats()),
+				Promise.resolve(getStaticRoutesStats()),
+				this.getSystemStats(),
+			])
 
 		return {
 			ok: true,
@@ -161,11 +169,15 @@ export class CoreStats {
 				totalModulesFull: modulesStats.totalModulesFull,
 				totalModulesShare: modulesStats.totalModulesShare,
 				totalModulesMws: modulesStats.totalModulesMws,
+				totalModulesStatic: modulesStats.totalModulesStatic,
+				totalStaticFiles: staticRoutes.totalFiles,
+				totalStaticRoutes: staticRoutes.totalRoutes,
 				totalWebSocketControllers: webSocketStats.totalControllers,
 				activeWebSocketConnections: webSocketStats.activeConnections,
 			},
 			endpoints: controllersStats.endpoints,
 			webSockets: webSocketStats,
+			staticRoutes,
 			modules: modulesStats.modules,
 			system,
 		}
