@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.0.13] - 2026-08-07
+
 ### Added
 
 - **SQL conflict-aware inserts:** `SQL.insert()` now accepts a PostgreSQL/SQLite
