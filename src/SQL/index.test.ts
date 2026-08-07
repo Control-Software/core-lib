@@ -342,6 +342,293 @@ describe('SQL — insert returning', () => {
 	})
 })
 
+describe('SQL — conflict-aware insert', () => {
+	test('generates a targeted PostgreSQL conflict clause and keeps values bound', async () => {
+		const nativeResult = Object.assign([{ id: 'claim-1' }], { count: 1 })
+		const recorder = makeDialectQueryRecorder('postgres', nativeResult)
+		const deliveryKey = "checkout'); DROP TABLE webhook_calls; --"
+
+		const inserted = await recorder.db.insert(
+			'webhook_calls',
+			{ id: 'claim-1', source: 'checkout', delivery_key: deliveryKey },
+			{
+				onConflict: {
+					columns: ['source', 'delivery_key'],
+					action: 'nothing',
+				},
+			},
+		)
+
+		expect(recorder.queries).toEqual([
+			'INSERT INTO webhook_calls (id, source, delivery_key) VALUES (?, ?, ?) ON CONFLICT (source, delivery_key) DO NOTHING RETURNING *',
+		])
+		expect(recorder.parameters).toEqual([['claim-1', 'checkout', deliveryKey]])
+		expect(recorder.queries[0]).not.toContain(deliveryKey)
+		expect(inserted).toEqual({
+			lastInsertRowId: 'claim-1',
+			changes: 1,
+			affectedRows: 1,
+			inserted: true,
+		})
+
+		const loserRecorder = makeDialectQueryRecorder(
+			'postgres',
+			Object.assign([], { count: 0 }),
+		)
+		const loser = await loserRecorder.db.insert(
+			'webhook_calls',
+			{ id: 'claim-2', source: 'checkout', delivery_key: deliveryKey },
+			{
+				onConflict: {
+					columns: ['source', 'delivery_key'],
+					action: 'nothing',
+				},
+				returning: [],
+			},
+		)
+
+		expect(loserRecorder.queries).toEqual([
+			'INSERT INTO webhook_calls (id, source, delivery_key) VALUES (?, ?, ?) ON CONFLICT (source, delivery_key) DO NOTHING',
+		])
+		expect(loser).toEqual({
+			lastInsertRowId: undefined,
+			changes: 0,
+			affectedRows: 0,
+			inserted: false,
+			rows: [],
+		})
+	})
+
+	test('supports single and compound targets atomically in real SQLite', async () => {
+		const db = makeDb()
+
+		await db.createTable('webhook_claims', {
+			id: 'TEXT PRIMARY KEY',
+			source: 'TEXT NOT NULL',
+			delivery_key: 'TEXT',
+			external_key: 'TEXT',
+			receipt_token: 'TEXT NOT NULL',
+			status: 'TEXT NOT NULL',
+		})
+		await db.createIndex('webhook_claims', 'delivery_key', {
+			name: 'uq_webhook_claims_delivery_key',
+			unique: true,
+		})
+		await db.createIndex('webhook_claims', ['source', 'external_key'], {
+			name: 'uq_webhook_claims_source_external_key',
+			unique: true,
+		})
+		await db.createIndex('webhook_claims', 'receipt_token', {
+			name: 'uq_webhook_claims_receipt_token',
+			unique: true,
+		})
+
+		const first = await db.insert(
+			'webhook_claims',
+			{
+				id: 'simple-1',
+				source: 'checkout',
+				delivery_key: 'delivery-1',
+				external_key: 'external-1',
+				receipt_token: 'receipt-1',
+				status: 'processing',
+			},
+			{ onConflict: { columns: ['delivery_key'], action: 'nothing' } },
+		)
+		const repeated = await db.insert(
+			'webhook_claims',
+			{
+				id: 'simple-2',
+				source: 'checkout',
+				delivery_key: 'delivery-1',
+				external_key: 'external-2',
+				receipt_token: 'receipt-2',
+				status: 'processing',
+			},
+			{ onConflict: { columns: ['delivery_key'], action: 'nothing' } },
+		)
+
+		expect(first).toMatchObject({ inserted: true, affectedRows: 1, changes: 1 })
+		expect(repeated).toMatchObject({
+			lastInsertRowId: undefined,
+			inserted: false,
+			affectedRows: 0,
+			changes: 0,
+		})
+
+		const returnedWinner = await db.insert<{ id: string }>(
+			'webhook_claims',
+			{
+				id: 'returned-1',
+				source: 'checkout',
+				delivery_key: 'delivery-2',
+				external_key: 'external-3',
+				receipt_token: 'receipt-3',
+				status: 'processing',
+			},
+			{
+				onConflict: { columns: ['delivery_key'], action: 'nothing' },
+				returning: ['id'],
+			},
+		)
+		const returnedLoser = await db.insert<{ id: string }>(
+			'webhook_claims',
+			{
+				id: 'returned-2',
+				source: 'checkout',
+				delivery_key: 'delivery-2',
+				external_key: 'external-4',
+				receipt_token: 'receipt-4',
+				status: 'processing',
+			},
+			{
+				onConflict: { columns: ['delivery_key'], action: 'nothing' },
+				returning: ['id'],
+			},
+		)
+
+		expect(returnedWinner).toMatchObject({
+			inserted: true,
+			affectedRows: 1,
+			rows: [{ id: 'returned-1' }],
+		})
+		expect(returnedLoser).toMatchObject({ inserted: false, affectedRows: 0, rows: [] })
+
+		const concurrent = await Promise.all([
+			db.insert(
+				'webhook_claims',
+				{
+					id: 'compound-1',
+					source: 'payments',
+					delivery_key: 'delivery-3',
+					external_key: 'shared-external',
+					receipt_token: 'receipt-5',
+					status: 'processing',
+				},
+				{
+					onConflict: {
+						columns: ['source', 'external_key'],
+						action: 'nothing',
+					},
+				},
+			),
+			db.insert(
+				'webhook_claims',
+				{
+					id: 'compound-2',
+					source: 'payments',
+					delivery_key: 'delivery-4',
+					external_key: 'shared-external',
+					receipt_token: 'receipt-6',
+					status: 'processing',
+				},
+				{
+					onConflict: {
+						columns: ['source', 'external_key'],
+						action: 'nothing',
+					},
+				},
+			),
+		])
+
+		expect(concurrent.filter(result => result?.inserted)).toHaveLength(1)
+		expect(concurrent.filter(result => !result?.inserted)).toHaveLength(1)
+
+		await db.insert('webhook_claims', {
+			id: 'unrelated-1',
+			source: 'ledger',
+			delivery_key: 'delivery-5',
+			external_key: 'external-5',
+			receipt_token: 'shared-receipt',
+			status: 'processing',
+		})
+		let unrelatedError: unknown
+		try {
+			await db.insert(
+				'webhook_claims',
+				{
+					id: 'unrelated-2',
+					source: 'ledger',
+					delivery_key: 'delivery-6',
+					external_key: 'external-6',
+					receipt_token: 'shared-receipt',
+					status: 'processing',
+				},
+				{ onConflict: { columns: ['delivery_key'], action: 'nothing' } },
+			)
+		} catch (error) {
+			unrelatedError = error
+		}
+		expect(isSQLError(unrelatedError, 'unique_violation')).toBe(true)
+
+		let legacyConflict: unknown
+		try {
+			await db.insert('webhook_claims', {
+				id: 'legacy-conflict',
+				source: 'checkout',
+				delivery_key: 'delivery-1',
+				external_key: 'legacy-external',
+				receipt_token: 'legacy-receipt',
+				status: 'processing',
+			})
+		} catch (error) {
+			legacyConflict = error
+		}
+		expect(isSQLError(legacyConflict, 'unique_violation')).toBe(true)
+	})
+
+	test('rejects malformed targets and unsupported MySQL before execution', async () => {
+		const postgres = makeDialectQueryRecorder('postgres')
+		const mysql = makeDialectQueryRecorder('mysql')
+		const data = { id: 'claim-1', delivery_key: 'delivery-1' }
+
+		await expect(
+			postgres.db.insert('webhook_calls', data, {
+				onConflict: { columns: [], action: 'nothing' },
+			}),
+		).rejects.toThrow('requires at least one column')
+		await expect(
+			postgres.db.insert('webhook_calls', data, {
+				onConflict: {
+					columns: ['delivery_key; DROP TABLE webhook_calls'],
+					action: 'nothing',
+				},
+			}),
+		).rejects.toThrow('Invalid conflict column')
+		await expect(
+			postgres.db.insert('webhook_calls', data, {
+				onConflict: {
+					columns: ['delivery_key', 'delivery_key'],
+					action: 'nothing',
+				},
+			}),
+		).rejects.toThrow('must not contain duplicates')
+		await expect(
+			postgres.db.insert('webhook_calls', data, {
+				onConflict: {
+					columns: ['webhook_calls.delivery_key'],
+					action: 'nothing',
+				},
+			}),
+		).rejects.toThrow('must be unqualified identifiers')
+		await expect(
+			postgres.db.insert('webhook_calls', data, {
+				onConflict: { columns: ['delivery_key'], action: 'update' },
+			} as unknown as {
+				onConflict: { columns: string[]; action: 'nothing' }
+			}),
+		).rejects.toThrow('action must be "nothing"')
+		await expect(
+			mysql.db.insert('webhook_calls', data, {
+				onConflict: { columns: ['delivery_key'], action: 'nothing' },
+			}),
+		).rejects.toThrow('MySQL does not support targeted')
+
+		expect(postgres.queries).toEqual([])
+		expect(mysql.queries).toEqual([])
+	})
+})
+
 describe('SQL — connection lifecycle', () => {
 	test('connect returns the wrapper, ping performs a query, and end forwards close options', async () => {
 		const lifecycle = makeLifecycleRecorder()

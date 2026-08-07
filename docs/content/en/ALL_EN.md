@@ -1151,19 +1151,19 @@ engine-specific DDL through `executeRaw()` or `alterTable()`.
 
 Data API:
 
-| Method                                     | Contract                                                                                 |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `insert(tableName, data, options?)`        | Bound values; optional typed PostgreSQL/SQLite `returning` rows plus write metadata.     |
-| `select(options)`                          | Projection/filter/sort with defaults `limit: 100`, `page: 1`; returns rows or `null`.    |
-| `selectPaginate(options)`                  | Defaults `limit: 10`; returns `{ data, total, page, limit }` from separate select/count. |
-| `update({ tableName, whereClause, data })` | Bound values; returns normalized affected-row count.                                     |
-| `updateById(tableName, id, data)`          | Delegates to `update` with `{ id }`.                                                     |
-| `delete(tableName, whereClause?)`          | Returns affected-row count; omitting the filter deletes every row.                       |
-| `deleteById(tableName, id)`                | Delegates to `delete` with `{ id }`.                                                     |
-| `count({ tableName, whereClause? })`       | Returns `COUNT(*)` as a JavaScript number.                                               |
+| Method                                     | Contract                                                                                      |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `insert(tableName, data, options?)`        | Bound values; optional typed `returning` rows and targeted PostgreSQL/SQLite conflict claims. |
+| `select(options)`                          | Projection/filter/sort with defaults `limit: 100`, `page: 1`; returns rows or `null`.         |
+| `selectPaginate(options)`                  | Defaults `limit: 10`; returns `{ data, total, page, limit }` from separate select/count.      |
+| `update({ tableName, whereClause, data })` | Bound values; returns normalized affected-row count.                                          |
+| `updateById(tableName, id, data)`          | Delegates to `update` with `{ id }`.                                                          |
+| `delete(tableName, whereClause?)`          | Returns affected-row count; omitting the filter deletes every row.                            |
+| `deleteById(tableName, id)`                | Delegates to `delete` with `{ id }`.                                                          |
+| `count({ tableName, whereClause? })`       | Returns `COUNT(*)` as a JavaScript number.                                                    |
 
-`insert` has a backwards-compatible metadata overload and an explicit returned-row
-overload:
+`insert` keeps its backwards-compatible metadata/returned-row overloads and adds
+targeted PostgreSQL/SQLite conflict claims:
 
 ```ts
 insert(tableName: string, data: KeyValueData): Promise<TypeReturnQuery | null>
@@ -1173,6 +1173,17 @@ insert<T = KeyValueData>(
 	data: KeyValueData,
 	options: { returning: readonly string[] },
 ): Promise<(TypeReturnQuery & { rows: T[] }) | null>
+
+insert(
+	tableName: string,
+	data: KeyValueData,
+	options: {
+		onConflict: {
+			columns: readonly string[]
+			action: 'nothing'
+		}
+	},
+): Promise<(TypeReturnQuery & { inserted: boolean }) | null>
 ```
 
 Omitting options preserves the original runtime shape with no `rows` property.
@@ -1193,6 +1204,36 @@ explicit PostgreSQL opt-out from the legacy `RETURNING *`. MySQL accepts the
 empty list but rejects a non-empty one before execution because the engine does
 not support `RETURNING`. Columns are identifier-validated; `['*']` is accepted
 only by itself. Use `executeRaw()` for expressions or aliases.
+
+`onConflict` emits one atomic `ON CONFLICT (<columns>) DO NOTHING` statement.
+The single-row winner reports `inserted: true` and one affected row; the loser
+reports `inserted: false`, zero affected rows, and no `lastInsertRowId`.
+`returning` can be combined with `onConflict`: the winner returns its projected
+row and the loser returns `rows: []`. Single/compound target columns must be a
+non-empty, duplicate-free list of validated, unqualified identifiers resolving to a
+compatible non-partial unique index or constraint. Because the target is
+explicit, unrelated unique, foreign-key, `NOT NULL`, and other errors still
+throw. Values remain bound. MySQL rejects `onConflict`; use trusted
+`executeRaw()` when a partial-index predicate or engine-specific conflict
+contract is required.
+
+```ts
+const claim = await sql.insert(
+	'webhook_calls',
+	{
+		uuid: crypto.randomUUID(),
+		source: 'dynamic-checkout',
+		delivery_key: messageId,
+		status: 'processing',
+	},
+	{
+		onConflict: {
+			columns: ['source', 'delivery_key'],
+			action: 'nothing',
+		},
+	},
+)
+```
 
 `translateMongoJsonToSql` supports `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`,
 `$in`, `$nin`, `$like`, inclusive `$between`, and recursive `$and`, `$or`, and
@@ -1726,10 +1767,15 @@ bun run typecheck
 bun run typecheck:modules
 bun run lint
 bun test
+
+# Optional live PostgreSQL integration suite
+S42_POSTGRES_TEST_URL=postgresql://user@host/database bun run test:postgres
 ```
 
 The main typecheck, lint, and tests pass in the current checkout.
 `typecheck:modules` reports the known missing fixture listed above.
+The PostgreSQL integration suite is skipped unless `S42_POSTGRES_TEST_URL` is
+provided; it creates and removes an isolated temporary table.
 
 ### Website publication model
 

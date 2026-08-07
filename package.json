@@ -47,6 +47,7 @@
 		"typecheck:modules": "bunx tsc -p tsconfig.modules.json --noEmit",
 		"lint": "bunx eslint \"src/**/*.ts\"",
 		"test": "bun test",
+		"test:postgres": "bun test src/SQL/postgres.integration.test.ts",
 		"prepublishOnly": "bun run typecheck"
 	},
 	"engines": {

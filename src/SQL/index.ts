@@ -5,13 +5,18 @@ import type {
 	ColumnDefinition,
 	CreateIndexOptions,
 	DropIndexOptions,
+	InsertConflictOptions,
+	InsertOnConflict,
 	InsertOptions,
+	InsertReturningConflictOptions,
 	KeyValueData,
 	SQLCloseOptions,
 	SQLIndexColumn,
 	SQLTransactionCallback,
 	SQLTransactionResult,
+	TypeConflictQuery,
 	TypeReturnQuery,
+	TypeReturningConflictQuery,
 	TypeReturningQuery,
 	TypeSQLConnection,
 	tableInternalSchema,
@@ -446,6 +451,16 @@ export class SQL {
 	}
 
 	public insert(tableName: string, data: KeyValueData): Promise<TypeReturnQuery | null>
+	public insert(
+		tableName: string,
+		data: KeyValueData,
+		options: InsertConflictOptions,
+	): Promise<TypeConflictQuery | null>
+	public insert<T = KeyValueData>(
+		tableName: string,
+		data: KeyValueData,
+		options: InsertReturningConflictOptions,
+	): Promise<TypeReturningConflictQuery<T> | null>
 	public insert<T = KeyValueData>(
 		tableName: string,
 		data: KeyValueData,
@@ -454,15 +469,22 @@ export class SQL {
 	public async insert<T = KeyValueData>(
 		tableName: string,
 		data: KeyValueData,
-		options?: InsertOptions,
-	): Promise<TypeReturnQuery | TypeReturningQuery<T> | null> {
+		options?: InsertOptions | InsertConflictOptions | InsertReturningConflictOptions,
+	): Promise<
+		| TypeReturnQuery
+		| TypeConflictQuery
+		| TypeReturningQuery<T>
+		| TypeReturningConflictQuery<T>
+		| null
+	> {
 		assertValidIdentifier(tableName, 'table name')
 		const keys = Object.keys(data)
 		keys.forEach(column => assertValidIdentifier(column, 'column'))
 		const values = Object.values(data)
 		let returning: string[] | undefined
+		let onConflict: InsertOnConflict | undefined
 
-		if (options !== undefined) {
+		if (options !== undefined && 'returning' in options) {
 			if (!Array.isArray(options.returning)) {
 				throw new Error('insert returning must be an array of columns')
 			}
@@ -476,13 +498,55 @@ export class SQL {
 				throw new Error('MySQL does not support INSERT ... RETURNING')
 			}
 		}
+		if (options !== undefined && 'onConflict' in options) {
+			if (
+				options.onConflict === null ||
+				typeof options.onConflict !== 'object' ||
+				Array.isArray(options.onConflict)
+			) {
+				throw new Error('insert onConflict must be an object')
+			}
+			if (!Array.isArray(options.onConflict.columns)) {
+				throw new Error('insert onConflict columns must be an array')
+			}
+			if (options.onConflict.columns.length === 0) {
+				throw new Error('insert onConflict requires at least one column')
+			}
+			options.onConflict.columns.forEach(column => {
+				assertValidIdentifier(column, 'conflict column')
+				if (column.includes('.')) {
+					throw new Error('insert onConflict columns must be unqualified identifiers')
+				}
+			})
+			if (
+				new Set(options.onConflict.columns).size !== options.onConflict.columns.length
+			) {
+				throw new Error('insert onConflict columns must not contain duplicates')
+			}
+			if (options.onConflict.action !== 'nothing') {
+				throw new Error('insert onConflict action must be "nothing"')
+			}
+			if (this.dbType === 'mysql') {
+				throw new Error(
+					'MySQL does not support targeted INSERT ... ON CONFLICT DO NOTHING',
+				)
+			}
+
+			onConflict = options.onConflict
+		}
+		if (options !== undefined && returning === undefined && onConflict === undefined) {
+			throw new Error('insert options require returning or onConflict')
+		}
 
 		const placeholders = keys.map(() => '?').join(', ')
-		const query = `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES (${placeholders})`
+		let query = `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES (${placeholders})`
+		if (onConflict) {
+			query += ` ON CONFLICT (${onConflict.columns.join(', ')}) DO NOTHING`
+		}
 
 		let finalQuery = query
 		if (returning === undefined && this.dbType === 'postgres') {
-			// Preserve the original insert contract when no options are provided.
+			// Preserve PostgreSQL's legacy metadata behavior without explicit returning.
 			finalQuery += ' RETURNING *'
 		} else if (returning !== undefined && returning.length > 0) {
 			finalQuery += ` RETURNING ${returning.join(', ')}`
@@ -490,10 +554,17 @@ export class SQL {
 
 		const result = await this.executeQuery(finalQuery, values)
 		const affectedRows = extractAffectedRows(result)
-		const metadata: TypeReturnQuery = {
-			lastInsertRowId: extractLastInsertId(result),
+		const inserted = affectedRows === 1
+		let metadata: TypeReturnQuery | TypeConflictQuery = {
+			lastInsertRowId: onConflict && !inserted ? undefined : extractLastInsertId(result),
 			changes: affectedRows,
 			affectedRows,
+		}
+		if (onConflict) {
+			metadata = {
+				...metadata,
+				inserted,
+			}
 		}
 
 		if (returning === undefined) {

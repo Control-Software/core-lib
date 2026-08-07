@@ -532,6 +532,18 @@ lanza `Table schema not defined`.
 ```ts
 insert(tableName: string, data: KeyValueData): Promise<TypeReturnQuery | null>
 
+insert(
+	tableName: string,
+	data: KeyValueData,
+	options: InsertConflictOptions,
+): Promise<TypeConflictQuery | null>
+
+insert<T = KeyValueData>(
+	tableName: string,
+	data: KeyValueData,
+	options: InsertReturningConflictOptions,
+): Promise<TypeReturningConflictQuery<T> | null>
+
 insert<T = KeyValueData>(
 	tableName: string,
 	data: KeyValueData,
@@ -549,6 +561,21 @@ type InsertOptions = {
 	returning: readonly string[]
 }
 
+type InsertOnConflict = {
+	columns: readonly string[]
+	action: 'nothing'
+}
+
+type InsertConflictOptions = {
+	onConflict: InsertOnConflict
+	returning?: undefined
+}
+
+type InsertReturningConflictOptions = {
+	returning: readonly string[]
+	onConflict: InsertOnConflict
+}
+
 type TypeReturnQuery = {
 	lastInsertRowId?: number | string
 	changes?: number
@@ -557,6 +584,14 @@ type TypeReturnQuery = {
 
 type TypeReturningQuery<T> = TypeReturnQuery & {
 	rows: T[]
+}
+
+type TypeConflictQuery = TypeReturnQuery & {
+	inserted: boolean
+}
+
+type TypeReturningConflictQuery<T> = TypeReturningQuery<T> & {
+	inserted: boolean
 }
 ```
 
@@ -580,15 +615,56 @@ const inserted = await sql.insert<InsertedUser>(
 console.log(inserted?.rows[0])
 ```
 
-El resultado con opciones explícitas siempre incluye `rows`. Una lista vacía
-omite deliberadamente la cláusula SQL `RETURNING` y devuelve `rows: []`; en
-PostgreSQL este es el opt-out del costo de transferencia del `RETURNING *`
-legacy:
+El overload con `returning` siempre incluye `rows`. Una lista vacía omite
+deliberadamente la cláusula SQL `RETURNING` y devuelve `rows: []`; en PostgreSQL
+este es el opt-out del costo de transferencia del `RETURNING *` legacy:
 
 ```ts
 const result = await sql.insert('audit_log', event, { returning: [] })
 // result.rows === []
 ```
+
+PostgreSQL y SQLite pueden conservar atómicamente la fila existente cuando un
+target de conflicto simple o compuesto coincide con un índice o constraint
+único:
+
+```ts
+const claim = await sql.insert(
+	'webhook_calls',
+	{
+		uuid: crypto.randomUUID(),
+		source: 'dynamic-checkout',
+		delivery_key: messageId,
+		status: 'processing',
+	},
+	{
+		onConflict: {
+			columns: ['source', 'delivery_key'],
+			action: 'nothing',
+		},
+	},
+)
+
+if (!claim?.inserted) {
+	return loadExistingReceipt()
+}
+```
+
+Es una sola sentencia de base de datos: para un insert de una fila, el ganador
+devuelve `inserted: true`, `changes: 1` y `affectedRows: 1`; el perdedor por
+conflicto devuelve `inserted: false`, cero filas afectadas y
+`lastInsertRowId: undefined`. Agregar `returning` conserva el mismo flag y
+devuelve la fila insertada para el ganador o `rows: []` para el perdedor.
+
+El target de conflicto es obligatorio para que los errores de unicidad, foreign
+key, `NOT NULL` y otros constraints no relacionados con esas columnas sigan
+lanzándose. Las columnas target deben ser una lista no vacía, sin duplicados y
+con identificadores validados y no calificados, y deben resolver a un índice o
+constraint único no parcial compatible. El API estructurado no acepta el predicado de un índice
+parcial; usar SQL confiable mediante `executeRaw()` cuando la inferencia de
+PostgreSQL/SQLite lo requiera. Los valores insertados siguen bindeados. MySQL
+rechaza `onConflict` antes de ejecutar la query porque no ofrece el mismo
+contrato dirigido de `DO NOTHING`.
 
 PostgreSQL y SQLite soportan un `returning` no vacío. MySQL no soporta la
 cláusula, por lo que S42-Core rechaza una lista no vacía antes de ejecutar la
@@ -999,6 +1075,8 @@ strings de opciones transaccionales y el string completo de `executeRaw`.
 - [`TransactionSQL.beginDistributed`](https://bun.com/reference/bun/TransactionSQL/beginDistributed)
 - [Documentación dedicada de `bun:sqlite`](https://bun.sh/docs/runtime/sqlite)
 - [Defaults de conexión de cliente PostgreSQL](https://www.postgresql.org/docs/current/runtime-config-client.html)
+- [PostgreSQL `INSERT ... ON CONFLICT`](https://www.postgresql.org/docs/current/sql-insert.html)
 - [Códigos de error de PostgreSQL](https://www.postgresql.org/docs/current/errcodes-appendix.html)
 - [Referencia de errores del servidor MySQL](https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+- [UPSERT de SQLite](https://www.sqlite.org/lang_upsert.html)
 - [Códigos de resultado y error de SQLite](https://www.sqlite.org/rescode.html)

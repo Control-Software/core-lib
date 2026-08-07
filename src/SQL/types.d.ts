@@ -84,12 +84,33 @@ export type SQLTransactionResult<T> =
 
 export type KeyValueData = { [key: string]: any }
 
+export type InsertOnConflict = {
+	/** Unique-index or unique-constraint columns used as the conflict target. */
+	columns: readonly string[]
+	/** Keep the existing row and report `inserted: false`. */
+	action: 'nothing'
+}
+
 export type InsertOptions = {
 	/**
 	 * Columns returned by PostgreSQL/SQLite after the insert. Use an empty array
 	 * to omit the RETURNING clause. The `*` wildcard must be used alone.
 	 */
 	returning: readonly string[]
+}
+
+export type InsertConflictOptions = {
+	onConflict: InsertOnConflict
+	returning?: undefined
+}
+
+export type InsertReturningConflictOptions = {
+	/**
+	 * Columns returned by PostgreSQL/SQLite when the row is inserted. A conflict
+	 * with `action: 'nothing'` returns an empty `rows` array.
+	 */
+	returning: readonly string[]
+	onConflict: InsertOnConflict
 }
 
 export type TypeReturnQuery = {
@@ -100,6 +121,14 @@ export type TypeReturnQuery = {
 
 export type TypeReturningQuery<T> = TypeReturnQuery & {
 	rows: T[]
+}
+
+export type TypeConflictQuery = TypeReturnQuery & {
+	inserted: boolean
+}
+
+export type TypeReturningConflictQuery<T> = TypeReturningQuery<T> & {
+	inserted: boolean
 }
 
 export type TypeSQLConnection = {

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **SQL conflict-aware inserts:** `SQL.insert()` now accepts a PostgreSQL/SQLite
+  `onConflict` target with one or more validated columns and `action: 'nothing'`.
+  The atomic result reports `inserted: true` for the caller that created the row
+  and `false` for a conflict loser while preserving existing metadata and typed
+  `returning` overloads. Unrelated constraints continue to throw, values remain
+  bound, stale SQLite `lastInsertRowId` metadata is cleared for losers, and
+  MySQL rejects the unsupported targeted contract before execution. Added real
+  SQLite coverage and an opt-in PostgreSQL integration suite through
+  `S42_POSTGRES_TEST_URL` / `bun run test:postgres`.
+
 ## [3.0.12] - 2026-08-06
 
 ### Added
