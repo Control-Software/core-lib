@@ -1,5 +1,5 @@
 {
-	"name": "s42-core",
+	"name": "core-lib",
 	"version": "3.0.13",
 	"description": "S42-Core v3 is a Bun-first, 100% module-oriented backend framework where each module encapsulates everything needed to work autonomously in production systems.",
 	"keywords": [
@@ -59,7 +59,7 @@
 		"access": "public"
 	},
 	"bugs": {
-		"url": "https://github.com/stock42/s42-core/issues"
+		"url": "https://github.com/Control-Software/core-lib/issues"
 	},
 	"homepage": "https://s42core.com",
 	"author": {
@@ -68,7 +68,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/stock42/s42-core"
+		"url": "https://github.com/Control-Software/core-lib"
 	},
 	"license": "MIT",
 	"dependencies": {
