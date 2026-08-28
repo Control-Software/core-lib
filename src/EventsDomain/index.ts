@@ -42,8 +42,6 @@ export class EventsDomain implements EventsDomainsInterface {
 		this.processUUID = uuid ?? Bun.randomUUIDv7()
 		this.clusterId = EventsDomain.resolveClusterId(clusterId)
 		this.adapter = new RedisEventsAdapter(redisInstance)
-		this.ensureEvent(GLOBAL_DEBUG_EVENT, true)
-		this.registerEmitterInternal(GLOBAL_DEBUG_EVENT, 'S42')
 		this.subscribeControlChannel()
 		this.startHeartbeat()
 	}
@@ -111,7 +109,6 @@ export class EventsDomain implements EventsDomainsInterface {
 		}
 
 		const emitted = await this.emitInternal(entry, event)
-		await this.emitGlobalDebug(event)
 		return emitted
 	}
 
@@ -194,6 +191,14 @@ export class EventsDomain implements EventsDomainsInterface {
 	}
 
 	private handleCommand(command: TypeEventCommand): void {
+		// SEC-587: the control channel is unauthenticated, so no remote command may name an
+		// internal `$$` event. Upstream let `$$` names bypass the A.B.C format rule, which is what
+		// made the hidden global-debug event registerable by any Redis publisher. `in` (not a
+		// property read) because TypeEventCommand is a discriminated union whose `removeInstance`
+		// member has no eventName; that member carries none and is unaffected.
+		if ('eventName' in command && command.eventName.startsWith('$$')) {
+			return
+		}
 		switch (command.type) {
 			case 'registerListener':
 				if (command.instanceId === this.processUUID) {
@@ -489,23 +494,6 @@ export class EventsDomain implements EventsDomainsInterface {
 		return true
 	}
 
-	private async emitGlobalDebug(event: EventType): Promise<void> {
-		const debugEntry = this.registeredEvents[GLOBAL_DEBUG_EVENT]
-		if (!debugEntry) {
-			return
-		}
-
-		const debugPayload: EventType = {
-			eventName: GLOBAL_DEBUG_EVENT,
-			payload: { event },
-			fromModuleName: 'S42',
-			uuid: Bun.randomUUIDv7(),
-			emittedAt: Date.now(),
-		}
-
-		await this.emitInternal(debugEntry, debugPayload)
-	}
-
 	private findFirstListener(entry: TypeEvent): TypeEvent['firstListener'] {
 		for (const [clusterId, cluster] of Object.entries(entry.listeners)) {
 			const first = cluster.instances[0]
@@ -571,8 +559,9 @@ export class EventsDomain implements EventsDomainsInterface {
 	}
 
 	private static isValidEventName(eventName: string): boolean {
-		if (eventName === GLOBAL_DEBUG_EVENT || eventName.startsWith('$$')) {
-			return true
+		// SEC-587: internal `$$` names are no longer a legal event name anywhere.
+		if (eventName.startsWith('$$')) {
+			return false
 		}
 		const parts = eventName.split('.').filter(Boolean)
 		if (parts.length < 3) {
