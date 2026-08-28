@@ -168,12 +168,24 @@ export class RouteControllers {
 		}
 	}
 
-	private async getJSONBody(req: Request): Promise<Record<string, any>> {
+	private async getJSONBody(
+		req: Request,
+	): Promise<{ body: Record<string, any>; rawBody: string; parseFailed: boolean }> {
+		let bodyText = ''
 		try {
-			const bodyText = await req.text()
-			return JSON.parse(bodyText)
+			bodyText = await req.text()
 		} catch {
-			return {}
+			return { body: {}, rawBody: '', parseFailed: false }
+		}
+		if (bodyText.length === 0) {
+			return { body: {}, rawBody: '', parseFailed: false }
+		}
+		try {
+			return { body: JSON.parse(bodyText), rawBody: bodyText, parseFailed: false }
+		} catch {
+			// The raw text is still returned: an HMAC verifier must authenticate the bytes
+			// before anyone decides whether malformed JSON is worth reporting.
+			return { body: {}, rawBody: bodyText, parseFailed: true }
 		}
 	}
 
@@ -210,7 +222,10 @@ export class RouteControllers {
 			}
 		}
 
-		const body = req.method !== 'GET' && !isFormData ? await this.getJSONBody(req) : {}
+		const parsed =
+			req.method !== 'GET' && !isFormData
+				? await this.getJSONBody(req)
+				: { body: {}, rawBody: '', parseFailed: false }
 
 		return {
 			headers: req.headers,
@@ -219,7 +234,9 @@ export class RouteControllers {
 				req.headers.get('cf-connecting-ip') ||
 				'::1',
 			query: this.getQueryParams(url.search),
-			body,
+			body: parsed.body,
+			rawBody: parsed.rawBody.length > 0 ? parsed.rawBody : undefined,
+			bodyParseFailed: parsed.parseFailed || undefined,
 			url: url.pathname,
 			method: req.method,
 			params: this.getParamsFromRequest(req),
