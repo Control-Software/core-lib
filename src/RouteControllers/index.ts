@@ -223,9 +223,9 @@ export class RouteControllers {
 		}
 
 		const parsed =
-			req.method !== 'GET' && !isFormData
-				? await this.getJSONBody(req)
-				: { body: {}, rawBody: '', parseFailed: false }
+			req.method !== 'GET' && !isFormData ?
+				await this.getJSONBody(req)
+			:	{ body: {}, rawBody: '', parseFailed: false }
 
 		return {
 			headers: req.headers,

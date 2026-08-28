@@ -18,7 +18,6 @@ type LocalHandler = {
 }
 
 const CONTROL_CHANNEL = '$$S42-EVENTS-REGISTRY$$'
-const GLOBAL_DEBUG_EVENT = '$$GLOBAL-S42-EVENTS-EMIT$$'
 
 // Each instance re-announces its listeners/emitters on this cadence; an instance
 // is considered dead (and evicted) once it has been silent for TTL_MULTIPLIER
@@ -541,7 +540,9 @@ export class EventsDomain implements EventsDomainsInterface {
 	}
 
 	private static normalizeEventName(eventName: string, moduleName?: string): string {
-		if (eventName === GLOBAL_DEBUG_EVENT || eventName.startsWith('$$')) {
+		// Returned verbatim so the caller's "Invalid event name" error quotes what was
+		// actually passed; isValidEventName rejects every `$$` name immediately after.
+		if (eventName.startsWith('$$')) {
 			return eventName
 		}
 		const cleanedEvent = eventName.replace(/\$/g, '.').replace(/\s+/g, '')
@@ -571,9 +572,6 @@ export class EventsDomain implements EventsDomainsInterface {
 	}
 
 	private static getModuleFromEventName(eventName: string): string {
-		if (eventName === GLOBAL_DEBUG_EVENT || eventName.startsWith('$$')) {
-			return 'S42'
-		}
 		return eventName.split('.')[0] ?? 'UNKNOWN'
 	}
 
