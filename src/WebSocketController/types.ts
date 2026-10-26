@@ -3,7 +3,7 @@ export type WebSocketData = Record<string, unknown>
 export type WebSocketPeer<TData extends WebSocketData> = Bun.ServerWebSocket<TData>
 
 export type WebSocketMessage = Parameters<
-	Bun.WebSocketHandler<WebSocketData>['message']
+	NonNullable<Bun.WebSocketHandler<WebSocketData>['message']>
 >[1]
 
 export type WebSocketPingData = Parameters<

@@ -222,7 +222,7 @@ export class SQL {
 			const parts = query.split('?')
 			const strings: any = parts
 
-			strings.raw = parts
+			Object.defineProperty(strings, 'raw', { value: parts })
 			return await this.dbInstance(strings, ...params)
 		})
 	}
